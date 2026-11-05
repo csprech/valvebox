@@ -23,7 +23,8 @@ namespace
                                         { "MIDI ch", "Clock", "BendRnge", nullptr, nullptr, nullptr, nullptr } };
     const char* const kModeNames[6] = { "PATTERN", "PART EDIT", "STEP EDIT", "SONG", "GLOBAL", "MIDI" };
 
-    const juce::Rectangle<int> kMatrixArea { 350, 244, 352, 112 };
+    const juce::Rectangle<int> kMatrixArea { 350, 250, 352, 104 };
+    const juce::Rectangle<int> kMessageArea { 350, 398, 470, 18 };
 
     bool isBlackStep (int i)
     {
@@ -42,6 +43,7 @@ MainComponent::MainComponent (Engine& e) : engine (e)
     layout();
     for (auto* b : { &audioBtn, &helpBtn })
     {
+        b->setLookAndFeel (&buttonLook);
         addAndMakeVisible (b);
         b->setWantsKeyboardFocus (false);
     }
@@ -69,7 +71,7 @@ MainComponent::MainComponent (Engine& e) : engine (e)
     noFocus (*this);
     addMouseListener (this, true);
     loadSettings();
-    setSize (1440, 900);
+    setSize (1440, kHeight * 1440 / kWidth);
     if (auto* forced = std::getenv ("VALVEBOX_WINDOW_SIZE"))
     {
         const auto wh = juce::StringArray::fromTokens (forced, "x", {});
@@ -77,6 +79,28 @@ MainComponent::MainComponent (Engine& e) : engine (e)
             setSize (wh[0].getIntValue(), wh[1].getIntValue());
     }
     startTimerHz (30);
+    if (auto* snap = std::getenv ("VALVEBOX_SNAPSHOT")) // testing aid: render the panel at 2x to a PNG and quit
+    {
+        const juce::File f (snap);
+        const bool play = std::getenv ("VALVEBOX_SNAPSHOT_PLAY") != nullptr;
+        if (play)
+            engine.withMachine ([] (Machine& m) {
+                m.selectPattern (1);
+                m.setKnob (Knob::TubeGain, 90);
+                m.press (Key::PlayPause);
+                m.release (Key::PlayPause);
+            });
+        juce::Timer::callAfterDelay (play ? 1700 : 900, [safe = juce::Component::SafePointer<MainComponent> (this), f] {
+            if (safe == nullptr)
+                return;
+            const auto img = safe->createComponentSnapshot (safe->getLocalBounds(), true, 2.0f);
+            f.deleteFile();
+            juce::FileOutputStream os (f);
+            juce::PNGImageFormat().writeImageToStream (img, os);
+            os.flush();
+            juce::JUCEApplicationBase::quit();
+        });
+    }
     if (auto* report = std::getenv ("VALVEBOX_SELFTEST"))
     {
         const juce::File f (report);
@@ -91,6 +115,8 @@ MainComponent::~MainComponent()
 {
     stopTimer();
     engine.onMessage = nullptr;
+    audioBtn.setLookAndFeel (nullptr);
+    helpBtn.setLookAndFeel (nullptr);
 }
 
 void MainComponent::prepareToQuit() { saveSettings(); }
@@ -105,8 +131,8 @@ void MainComponent::mouseDown (const juce::MouseEvent&)
 
 void MainComponent::build()
 {
-    auto key = [this] (Key k, const juce::String& label, const juce::String& shiftLabel = {}, KeyWidget::Style st = KeyWidget::Style::Grey,
-                       bool led = true) {
+    using S = KeyWidget::Style;
+    auto key = [this] (Key k, const juce::String& label, const juce::String& shiftLabel = {}, S st = S::Pill, bool led = true) {
         auto w = std::make_unique<KeyWidget> (k, label, shiftLabel, st, led);
         w->onPress = [this] (Key kk) { pressKey (kk); };
         w->onRelease = [this] (Key kk) { releaseKey (kk); };
@@ -114,54 +140,56 @@ void MainComponent::build()
         keyFor[(size_t) k] = w.get();
         keys.push_back (std::move (w));
     };
-    // common section
-    key (Key::ResetErase, "RESET", "ERASE", KeyWidget::Style::Grey, false);
-    key (Key::Rec, "REC", {}, KeyWidget::Style::Red);
-    key (Key::StopCancel, "STOP", "CANCEL", KeyWidget::Style::Grey, false);
-    key (Key::PlayPause, "PLAY/PAUSE", {}, KeyWidget::Style::Grey);
-    key (Key::Tap, "TAP", {}, KeyWidget::Style::Grey, false);
-    key (Key::PartMute, "PART MUTE", "REST/TIE");
-    key (Key::Solo, "SOLO", "TRANSPOSE");
+    // common section: the transport keys on their cream strip
+    key (Key::ResetErase, "RESET", "ERASE", S::Transport, false);
+    key (Key::Rec, "REC", {}, S::Transport);
+    key (Key::StopCancel, "STOP", "CANCEL", S::Transport, false);
+    key (Key::PlayPause, "PLAY/PAUSE", {}, S::Transport);
+    key (Key::Tap, "TAP", {}, S::Square, false);
+    key (Key::PartMute, "PART MUTE", "REST/TIE", S::Square);
+    key (Key::Solo, "SOLO", "TRANSPOSE", S::Square);
+    for (auto k : { Key::ResetErase, Key::Rec, Key::StopCancel, Key::PlayPause, Key::Tap, Key::PartMute, Key::Solo })
+        keyFor[(size_t) k]->onCream = true;
     key (Key::AudioInThru, "AUDIO IN THRU");
     key (Key::TempoLock, "TEMPO LOCK");
     key (Key::AutoBpm, "AUTO BPM SCAN");
     key (Key::WriteRename, "WRITE", "RENAME");
-    key (Key::CursorLeft, "<", {}, KeyWidget::Style::Grey, false);
-    key (Key::CursorRight, ">", {}, KeyWidget::Style::Grey, false);
+    key (Key::CursorLeft, "<", {}, S::Pill, false);
+    key (Key::CursorRight, ">", {}, S::Pill, false);
+    keyFor[(size_t) Key::CursorLeft]->onCream = keyFor[(size_t) Key::CursorRight]->onCream = true;
     const Key modeKeys[6] = { Key::ModePattern, Key::ModePartEdit, Key::ModeStepEdit, Key::ModeSong, Key::ModeGlobal, Key::ModeMidi };
     for (int i = 0; i < 6; ++i)
         key (modeKeys[i], kModeNames[i]);
     // edit section
-    key (Key::FxChain, "FX CHAIN", {}, KeyWidget::Style::Grey, false);
-    key (Key::FxEditSelect, "EDIT SELECT", {}, KeyWidget::Style::Grey, false);
+    key (Key::FxChain, "FX CHAIN", {}, S::Pill, false);
+    key (Key::FxEditSelect, "EDIT SELECT", {}, S::Pill, false);
     key (Key::FxMotion, "MOTION SEQ");
-    key (Key::PartMotion, "MOTION SEQ", {}, KeyWidget::Style::Grey, false);
-    key (Key::AmpEg, "AMP EG", {}, KeyWidget::Style::Grey, false);
+    key (Key::PartMotion, "MOTION SEQ", {}, S::Pill, false);
+    key (Key::AmpEg, "AMP EG", {}, S::Pill, false);
     key (Key::Roll, "ROLL");
-    key (Key::FxSelect, "FX SELECT", {}, KeyWidget::Style::Grey, false);
+    key (Key::FxSelect, "FX SELECT", {}, S::Pill, false);
     key (Key::FxSend, "FX SEND");
-    key (Key::ModType, "TYPE", {}, KeyWidget::Style::Grey, false);
-    key (Key::ModDest, "DEST", {}, KeyWidget::Style::Grey, false);
+    key (Key::ModType, "TYPE", {}, S::Pill, false);
+    key (Key::ModDest, "DEST", {}, S::Pill, false);
     key (Key::ModBpmSync, "BPM SYNC");
-    key (Key::FilterType, "TYPE", {}, KeyWidget::Style::Grey, false);
+    key (Key::FilterType, "TYPE", {}, S::Pill, false);
     // parts
     const char* drumNames[9] = { "1", "2", "3", "4", "5", "6A", "6B", "7A", "7B" };
     for (int i = 0; i < 9; ++i)
-        key ((Key) ((int) Key::Drum1 + i), drumNames[i], {}, KeyWidget::Style::Blue);
-    key (Key::DrumAccent, "ACCENT", {}, KeyWidget::Style::Blue);
+        key ((Key) ((int) Key::Drum1 + i), drumNames[i], {}, S::Square);
+    key (Key::DrumAccent, "ACCENT", {}, S::Square);
     for (int i = 0; i < 5; ++i)
-        key ((Key) ((int) Key::Synth1 + i), juce::String (i + 1), {}, KeyWidget::Style::Blue);
-    key (Key::SynthAccent, "ACCENT", {}, KeyWidget::Style::Blue);
+        key ((Key) ((int) Key::Synth1 + i), juce::String (i + 1), {}, S::Square);
+    key (Key::SynthAccent, "ACCENT", {}, S::Square);
     key (Key::Keyboard, "KEYBOARD");
-    key (Key::SelectLeft, "<", {}, KeyWidget::Style::Grey, false);
-    key (Key::SelectRight, ">", {}, KeyWidget::Style::Grey, false);
-    key (Key::Shift, "SHIFT");
-    key (Key::PatternSet, "PATTERN SET");
-    const char* shiftFns[16] = { "LAST STEP", "MOVE DATA", "SHIFT NOTE", "COPY PART", "COPY SOUND", "CLR MOTION", "CLEAR PART", "CLEAR PTN",
-                                 "INSERT PTN", "DELETE PTN", "CLEAR SONG", "MIDI UTIL", "CARD", "", "", "" };
-    const char* notes[16] = { "A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "C" };
+    key (Key::SelectLeft, "<", {}, S::Pill, false);
+    key (Key::SelectRight, ">", {}, S::Pill, false);
+    key (Key::Shift, "SHIFT", {}, S::Round, false);
+    key (Key::PatternSet, "PATTERN SET", {}, S::Pill, false);
+    const char* shiftFns[16] = { "LAST STEP", "MOVE DATA", "SHIFT NOTE", "COPY PART", "COPY SOUND", "CLEAR MOTION", "CLEAR PART", "CLEAR PATTERN",
+                                 "INSERT PATTERN", "DELETE PATTERN", "CLEAR SONG", "MIDI UTILITY", "CARD", "", "", "" };
     for (int i = 0; i < 16; ++i)
-        key ((Key) ((int) Key::Step1 + i), juce::String (i + 1) + " " + notes[i], shiftFns[i], isBlackStep (i) ? KeyWidget::Style::Black : KeyWidget::Style::White);
+        key ((Key) ((int) Key::Step1 + i), juce::String (i + 1), shiftFns[i], isBlackStep (i) ? S::StepSharp : S::Step);
     for (auto k : { Key::Shift, Key::PartMute, Key::Solo, Key::PatternSet })
         keyFor[(size_t) k]->latching = true;
 
@@ -212,6 +240,7 @@ void MainComponent::build()
         lamps.push_back (std::move (ref));
     };
     lamp (Lamp::Beat, 0, "BEAT", colours::ledOrange);
+    lamps.back().w->onCream = true;
     for (int i = 0; i < 8; ++i)
         lamp (Lamp::SelectGreen, i, {}, colours::ledGreen);
     for (int i = 0; i < 8; ++i)
@@ -254,104 +283,104 @@ void MainComponent::layout()
     };
 
     // ---- left: volume, tubes, the audio-in keys
-    place (kn (Knob::MasterVolume), 40, 72, 92, 100);
-    place (kn (Knob::TubeGain), 137, 72, 92, 100);
-    place (kn (Knob::AudioInLevel), 234, 72, 92, 100);
-    place (&valves, 52, 186, 262, 150);
-    place (k (Key::AudioInThru), 40, 352, 92, 66);
-    place (k (Key::TempoLock), 137, 352, 92, 66);
-    place (k (Key::AutoBpm), 234, 352, 92, 66);
+    place (kn (Knob::MasterVolume), 40, 66, 92, 100);
+    place (kn (Knob::TubeGain), 137, 66, 92, 100);
+    place (kn (Knob::AudioInLevel), 234, 66, 92, 100);
+    place (&valves, 52, 176, 262, 170);
+    place (k (Key::AudioInThru), 40, 360, 92, 32);
+    place (k (Key::TempoLock), 137, 360, 92, 32);
+    place (k (Key::AutoBpm), 234, 360, 92, 32);
 
-    // ---- the display, dial, matrix menu and modes
-    place (&lcd, 350, 70, 352, 166);
-    place (&dial, 716, 66, 100, 100);
-    place (lampAt (Lamp::Beat, 0), 716, 168, 60, 14);
-    place (k (Key::CursorLeft), 712, 184, 52, 56);
-    place (k (Key::CursorRight), 766, 184, 52, 56);
-    place (k (Key::WriteRename), 712, 266, 106, 74);
+    // ---- the display panel: LCD, dial, cursor keys; the matrix menu, the modes and WRITE under it
+    place (&lcd, 350, 66, 352, 168);
+    place (&dial, 716, 60, 104, 104);
+    place (lampAt (Lamp::Beat, 0), 724, 168, 60, 14);
+    place (k (Key::CursorLeft), 712, 192, 54, 34);
+    place (k (Key::CursorRight), 768, 192, 54, 34);
+    place (k (Key::WriteRename), 712, 262, 108, 50);
     for (int i = 0; i < 6; ++i)
-        place (k ((Key) ((int) Key::ModePattern + i)), 350 + i * 59, 360, 59, 66);
+        place (k ((Key) ((int) Key::ModePattern + i)), 350 + i * 59, 360, 59, 32);
 
     // ---- EFFECT
-    place (kn (Knob::FxType), 836, 82, 150, 160);
-    place (kn (Knob::FxEdit1), 990, 76, 54, 82);
-    place (kn (Knob::FxEdit2), 1044, 76, 54, 82);
-    place (k (Key::FxChain), 990, 166, 54, 56);
-    place (lampAt (Lamp::ChainOneTwo, 0), 990, 226, 30, 12);
-    place (lampAt (Lamp::ChainTwoThree, 0), 1018, 226, 30, 12);
-    place (k (Key::FxEditSelect), 1044, 166, 54, 56);
+    place (kn (Knob::FxType), 836, 76, 150, 164);
+    place (kn (Knob::FxEdit1), 990, 74, 56, 84);
+    place (kn (Knob::FxEdit2), 1044, 74, 56, 84);
+    place (k (Key::FxChain), 990, 170, 54, 32);
+    place (lampAt (Lamp::ChainOneTwo, 0), 994, 208, 44, 12);
+    place (lampAt (Lamp::ChainTwoThree, 0), 994, 222, 44, 12);
+    place (k (Key::FxEditSelect), 1046, 170, 54, 32);
     for (int i = 0; i < 3; ++i)
-        place (lampAt (Lamp::EditSelect, i), 1046 + i * 18, 226, 18, 12);
+        place (lampAt (Lamp::EditSelect, i), 1052, 206 + i * 13, 46, 12);
 
     // ---- MODULATION: knobs, keys, and the type / destination lamps beside them
-    place (kn (Knob::ModSpeed), 1110, 76, 62, 82);
-    place (kn (Knob::ModDepth), 1172, 76, 62, 82);
-    place (k (Key::ModType), 1110, 166, 42, 56);
-    place (k (Key::ModDest), 1154, 166, 42, 56);
-    place (k (Key::ModBpmSync), 1198, 166, 42, 56);
+    place (kn (Knob::ModSpeed), 1110, 74, 62, 84);
+    place (kn (Knob::ModDepth), 1172, 74, 62, 84);
+    place (k (Key::ModType), 1108, 176, 44, 32);
+    place (k (Key::ModDest), 1152, 176, 44, 32);
+    place (k (Key::ModBpmSync), 1196, 176, 48, 32);
     for (int i = 0; i < 5; ++i)
-        place (lampAt (Lamp::ModTypeLamp, i), 1244, 78 + i * 14, 40, 13);
+        place (lampAt (Lamp::ModTypeLamp, i), 1248, 80 + i * 15, 40, 14);
     for (int i = 0; i < 6; ++i)
-        place (lampAt (Lamp::ModDestLamp, i), 1284, 78 + i * 14, 46, 13);
+        place (lampAt (Lamp::ModDestLamp, i), 1286, 80 + i * 15, 46, 14);
 
     // ---- SYNTH OSCILLATOR
-    place (kn (Knob::OscType), 1342, 82, 150, 160);
-    place (kn (Knob::OscEdit1), 1500, 76, 72, 82);
-    place (kn (Knob::OscEdit2), 1500, 160, 72, 82);
+    place (kn (Knob::OscType), 1342, 76, 150, 164);
+    place (kn (Knob::OscEdit1), 1500, 72, 72, 84);
+    place (kn (Knob::OscEdit2), 1500, 156, 72, 84);
 
     // ---- PART COMMON
-    place (k (Key::PartMotion), 836, 280, 70, 60);
-    place (lampAt (Lamp::MotionSmooth, 0), 838, 342, 70, 12);
-    place (lampAt (Lamp::MotionTrigHold, 0), 838, 356, 70, 12);
+    place (k (Key::PartMotion), 838, 284, 70, 32);
+    place (lampAt (Lamp::MotionSmooth, 0), 840, 322, 70, 13);
+    place (lampAt (Lamp::MotionTrigHold, 0), 840, 337, 70, 13);
     place (kn (Knob::PitchGlide), 912, 270, 70, 86);
     place (kn (Knob::EgTime), 984, 270, 70, 86);
     place (kn (Knob::Pan), 1056, 270, 70, 86);
     place (kn (Knob::Level), 1128, 270, 70, 86);
-    place (k (Key::AmpEg), 912, 360, 66, 52);
-    place (lampAt (Lamp::AmpDecay, 0), 914, 414, 34, 12);
-    place (lampAt (Lamp::AmpGate, 0), 946, 414, 34, 12);
-    place (k (Key::Roll), 984, 360, 66, 52);
-    place (k (Key::FxSelect), 1056, 360, 66, 52);
+    place (k (Key::AmpEg), 914, 368, 66, 32);
+    place (lampAt (Lamp::AmpDecay, 0), 914, 404, 36, 12);
+    place (lampAt (Lamp::AmpGate, 0), 950, 404, 34, 12);
+    place (k (Key::Roll), 986, 368, 66, 32);
+    place (k (Key::FxSelect), 1058, 368, 66, 32);
     for (int i = 0; i < 3; ++i)
-        place (lampAt (Lamp::FxSelectLamp, i), 1056 + i * 22, 414, 22, 12);
-    place (k (Key::FxSend), 1128, 360, 66, 52);
-    place (k (Key::FxMotion), 836, 382, 70, 56); // (EFFECT's MOTION SEQ, under the part's)
+        place (lampAt (Lamp::FxSelectLamp, i), 1058 + i * 22, 404, 22, 12);
+    place (k (Key::FxSend), 1130, 368, 66, 32);
+    place (k (Key::FxMotion), 838, 380, 70, 32); // (EFFECT's MOTION SEQ, under the part's)
 
     // ---- SYNTH FILTER
     place (kn (Knob::Cutoff), 1218, 270, 68, 86);
     place (kn (Knob::EgInt), 1288, 270, 68, 86);
     place (kn (Knob::Resonance), 1358, 270, 68, 86);
     place (kn (Knob::Drive), 1428, 270, 68, 86);
-    place (k (Key::FilterType), 1500, 280, 70, 60);
+    place (k (Key::FilterType), 1502, 284, 70, 32);
     for (int i = 0; i < 4; ++i)
-        place (lampAt (Lamp::FilterTypeLamp, i), 1504, 346 + i * 15, 70, 14);
+        place (lampAt (Lamp::FilterTypeLamp, i), 1506, 326 + i * 16, 70, 14);
 
-    // ---- transport and parts
+    // ---- transport (on its cream strip) and parts
     const Key transport[7] = { Key::ResetErase, Key::Rec, Key::StopCancel, Key::PlayPause, Key::Tap, Key::PartMute, Key::Solo };
     for (int i = 0; i < 7; ++i)
-        place (k (transport[i]), 40 + i * 76, 470, 74, 92);
+        place (k (transport[i]), 40 + i * 77, 462, 74, 96);
     for (int i = 0; i < 10; ++i)
-        place (k (i < 9 ? (Key) ((int) Key::Drum1 + i) : Key::DrumAccent), 600 + i * 56, 488, 54, 74);
+        place (k (i < 9 ? (Key) ((int) Key::Drum1 + i) : Key::DrumAccent), 600 + i * 56, 480, 54, 76);
     for (int i = 0; i < 6; ++i)
-        place (k (i < 5 ? (Key) ((int) Key::Synth1 + i) : Key::SynthAccent), 1180 + i * 56, 488, 54, 74);
-    place (k (Key::Keyboard), 1514, 470, 62, 92);
+        place (k (i < 5 ? (Key) ((int) Key::Synth1 + i) : Key::SynthAccent), 1180 + i * 56, 480, 54, 76);
+    place (k (Key::Keyboard), 1512, 500, 68, 34);
 
-    // ---- step keys, select keys and LEDs, SHIFT, PATTERN SET
-    place (k (Key::Shift), 40, 760, 74, 92);
-    place (k (Key::PatternSet), 120, 760, 84, 92);
-    place (k (Key::SelectLeft), 226, 620, 58, 56);
-    place (k (Key::SelectRight), 750, 620, 58, 56);
+    // ---- SHIFT, PATTERN SET, the select keys and LEDs, the step keys
+    place (k (Key::Shift), 44, 596, 72, 72);
+    place (k (Key::PatternSet), 124, 612, 96, 36);
+    place (k (Key::SelectLeft), 226, 612, 60, 36);
+    place (k (Key::SelectRight), 750, 612, 60, 36);
     for (int i = 0; i < 8; ++i)
     {
-        place (lampAt (Lamp::SelectGreen, i), 300 + i * 56, 626, 14, 14);
-        place (lampAt (Lamp::SelectRed, i), 300 + i * 56, 652, 14, 14);
+        place (lampAt (Lamp::SelectGreen, i), 304 + i * 56, 606, 14, 14);
+        place (lampAt (Lamp::SelectRed, i), 304 + i * 56, 630, 14, 14);
     }
     for (int i = 0; i < 16; ++i)
-        place (k ((Key) ((int) Key::Step1 + i)), 226 + i * 68, 700, 66, 190);
+        place (k ((Key) ((int) Key::Step1 + i)), 226 + i * 68, 678, 66, 96);
 
     // ---- the arpeggiator
-    place (&ribbonW, 1340, 760, 196, 70);
-    place (&sliderW, 1540, 620, 40, 270);
+    place (&ribbonW, 1344, 610, 164, 156);
+    place (&sliderW, 1510, 600, 48, 172);
 }
 
 // ---------------------------------------------------------------- painting
@@ -364,8 +393,8 @@ void MainComponent::resized()
     const float sc = std::min (getWidth() / (float) kWidth, getHeight() / (float) kHeight);
     const float ox = (getWidth() - kWidth * sc) * 0.5f, oy = (getHeight() - kHeight * sc) * 0.5f;
     canvas.setTransform (juce::AffineTransform::scale (sc).translated (ox, oy));
-    audioBtn.setBounds ((int) (ox + 1390 * sc), (int) (oy + 18 * sc), (int) (104 * sc), (int) (26 * sc));
-    helpBtn.setBounds ((int) (ox + 1500 * sc), (int) (oy + 18 * sc), (int) (70 * sc), (int) (26 * sc));
+    audioBtn.setBounds ((int) (ox + 1372 * sc), (int) (oy + 18 * sc), (int) (104 * sc), (int) (26 * sc));
+    helpBtn.setBounds ((int) (ox + 1482 * sc), (int) (oy + 18 * sc), (int) (70 * sc), (int) (26 * sc));
     background = {};
 }
 
@@ -377,98 +406,174 @@ void MainComponent::paintPanel (juce::Graphics& g)
         background = juce::Image (juce::Image::ARGB, (int) std::ceil (kWidth * sc), (int) std::ceil (kHeight * sc), true);
         juce::Graphics bg (background);
         bg.addTransform (juce::AffineTransform::scale (sc));
-        // the end cheeks and the metallic blue panel
-        bg.setColour (juce::Colour (0xff1a1b1e));
-        bg.fillRect (0, 0, kWidth, kHeight);
-        auto pa = juce::Rectangle<float> (18, 10, kWidth - 36, kHeight - 20);
-        const auto& tile = materials::cached ("vbpaint", [=] { return materials::paintTile (colours::panel, 256, 0.9f, 11); });
-        bg.setFillType (juce::FillType (tile, juce::AffineTransform::scale (1.0f / sc)));
-        bg.fillRoundedRectangle (pa, 10.0f);
-        // brushed metal: fine horizontal streaks, and a sheen from the top
-        juce::Random rng (5);
-        for (int y = (int) pa.getY(); y < (int) pa.getBottom(); y += 2)
-        {
-            bg.setColour (juce::Colours::white.withAlpha (0.015f + 0.02f * rng.nextFloat()));
-            bg.drawHorizontalLine (y, pa.getX() + 4, pa.getRight() - 4);
-        }
-        bg.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.16f), 0, pa.getY(), juce::Colours::transparentWhite, 0, pa.getY() + 340, false));
-        bg.fillRoundedRectangle (pa, 10.0f);
-        bg.setColour (juce::Colours::black.withAlpha (0.45f));
-        bg.drawRoundedRectangle (pa, 10.0f, 1.5f);
-        for (auto pt : { juce::Point<float> (32, 24), juce::Point<float> (kWidth - 32.0f, 24), juce::Point<float> (32, kHeight - 24.0f),
-                         juce::Point<float> (kWidth - 32.0f, kHeight - 24.0f) })
-        {
-            const int px = (int) std::ceil (10 * sc);
-            materials::drawAt (bg, materials::cached ("vbscrew:" + juce::String (px), [=] { return materials::screw (px, 0.4f); }),
-                               juce::Rectangle<float> (10, 10).withCentre (pt));
-        }
-        // the name
-        juce::GlyphArrangement ga;
-        ga.addLineOfText (panelFont (30.0f, true), "valvebox", 0, 0);
-        juce::Path word;
-        ga.createPath (word);
-        word.applyTransform (juce::AffineTransform::translation (46, 50));
-        bg.setColour (colours::print);
-        bg.fillPath (word);
-        print (bg, "VB-16   GROOVE PRODUCTION STATION", { 190, 26, 420, 26 }, 13.0f, juce::Justification::centredLeft, false, true);
-        // section boxes and titles
-        auto box = [&] (juce::Rectangle<float> r, const juce::String& title) {
-            bg.setColour (juce::Colours::black.withAlpha (0.13f));
-            bg.fillRoundedRectangle (r, 6.0f);
-            bg.setColour (colours::print.withAlpha (0.55f));
-            bg.drawRoundedRectangle (r, 6.0f, 1.0f);
-            if (title.isNotEmpty())
-            {
-                auto t = juce::Rectangle<float> (r.getX() + 10, r.getY() - 8, (float) title.length() * 7.0f + 16, 16);
-                bg.setColour (colours::panel);
-                bg.fillRect (t);
-                print (bg, title, t, 10.5f, juce::Justification::centred, false, true);
-            }
-        };
-        box ({ 830, 64, 272, 182 }, "EFFECT");
-        box ({ 1104, 64, 230, 182 }, "MODULATION");
-        box ({ 1336, 64, 244, 182 }, "SYNTH OSCILLATOR");
-        box ({ 830, 258, 372, 182 }, "PART COMMON");
-        box ({ 1206, 258, 374, 182 }, "SYNTH FILTER");
-        box ({ 592, 462, 580, 108 }, "DRUM PART");
-        box ({ 1172, 462, 340, 108 }, "SYNTH PART");
-        box ({ 1330, 600, 250, 290 }, "ARPEGGIATOR");
-        print (bg, "FX MOTION", { 836, 438, 70, 12 }, 7.5f, juce::Justification::centred, true);
-        // select LED numbers, the step key row's title
-        for (int i = 0; i < 8; ++i)
-            print (bg, juce::String (i + 1), { 300.0f + i * 56 + 16, 626, 20, 40 }, 10.0f, juce::Justification::centredLeft, true);
-        print (bg, "PLAYING", { 760.0f - 0, 600, 60, 14 }, 8.0f, juce::Justification::centredLeft, true);
-        print (bg, "STEP KEYS  /  KEYBOARD", { 226, 680, 300, 16 }, 10.0f, juce::Justification::centredLeft, false, true);
-        print (bg, "valve drive by twin triodes", { 52, 336, 262, 14 }, 8.5f, juce::Justification::centred, true);
+        paintBackground (bg, sc);
     }
     g.drawImageTransformed (background, juce::AffineTransform::scale (1.0f / sc));
 
-    // the matrix menu: the current page lit
+    // the matrix menu: the six modes in columns, the current page lit
     auto m = kMatrixArea.toFloat();
-    g.setColour (juce::Colours::black.withAlpha (0.18f));
-    g.fillRoundedRectangle (m, 4.0f);
-    const float cw = m.getWidth() / 6.0f, rh = (m.getHeight() - 14.0f) / 7.0f;
+    const float cw = m.getWidth() / 6.0f, rh = (m.getHeight() - 17.0f) / 7.0f;
     for (int c = 0; c < 6; ++c)
     {
-        print (g, kModeNames[c], { m.getX() + c * cw, m.getY() + 1, cw, 12 }, 8.0f, juce::Justification::centred, c != currentMode, true);
+        const auto col = juce::Rectangle<float> (m.getX() + c * cw, m.getY(), cw, m.getHeight());
+        if (c > 0)
+        {
+            g.setColour (colours::print.withAlpha (0.45f));
+            g.fillRect (col.getX(), col.getY() + 2.0f, 1.0f, col.getHeight() - 4.0f);
+        }
+        printInk (g, kModeNames[c], { col.getX() + 2, m.getY(), cw - 4, 15 }, 11.0f, colours::print.withAlpha (c == currentMode ? 1.0f : 0.8f),
+                  juce::Justification::centred);
         for (int r = 0; r < 7 && kMatrix[c][r] != nullptr; ++r)
         {
-            auto cell = juce::Rectangle<float> (m.getX() + c * cw, m.getY() + 14 + r * rh, cw, rh);
+            auto cell = juce::Rectangle<float> (col.getX() + 3.0f, m.getY() + 17 + r * rh, cw - 6.0f, rh);
             if (c == currentMode && r == currentPage)
             {
-                g.setColour (colours::print.withAlpha (0.85f));
-                g.fillRoundedRectangle (cell.reduced (2.0f, 0.5f), 2.0f);
-                g.setColour (colours::panelDark);
-                g.setFont (panelFont (9.0f, true));
-                g.drawText (kMatrix[c][r], cell, juce::Justification::centred, false);
+                g.setColour (colours::print);
+                g.fillRoundedRectangle (cell.reduced (0.0f, 0.5f), rh * 0.45f);
+                printInk (g, kMatrix[c][r], cell, 10.5f, colours::panelDark, juce::Justification::centred);
             }
             else
-                print (g, kMatrix[c][r], cell, 9.0f, juce::Justification::centred, true);
+                printInk (g, kMatrix[c][r], cell, 10.5f, colours::print.withAlpha (0.82f), juce::Justification::centred, false);
         }
     }
-    // a line for messages from the engine (MIDI devices, dumps) under the display
+    // a line for messages from the engine (MIDI devices, dumps) under the modes
     if (engineMessage.isNotEmpty() && juce::Time::getMillisecondCounter() < engineMessageUntil)
-        print (g, engineMessage, { 350, 430, 470, 16 }, 10.0f, juce::Justification::centredLeft, false, true);
+        print (g, engineMessage, kMessageArea.toFloat(), 11.0f, juce::Justification::centredLeft, false, true);
+}
+
+void MainComponent::paintBackground (juce::Graphics& bg, float sc)
+{
+    // the end cheeks and the metallic blue panel
+    bg.setColour (juce::Colour (0xff141518));
+    bg.fillRect (0, 0, kWidth, kHeight);
+    const auto pa = juce::Rectangle<float> (14, 8, kWidth - 28, kHeight - 16);
+    {
+        const auto& tile = materials::cached ("vbflake", [] { return materials::flakeTile (colours::panel, 252, 11); });
+        bg.setFillType (juce::FillType (tile, juce::AffineTransform::scale (1.0f / sc)));
+        bg.fillRoundedRectangle (pa, 12.0f);
+    }
+    {
+        // the light: brighter towards the top-left, deeper towards the bottom-right, and a broad sheen across
+        juce::Graphics::ScopedSaveState save (bg);
+        juce::Path panelShape;
+        panelShape.addRoundedRectangle (pa, 12.0f);
+        bg.reduceClipRegion (panelShape);
+        juce::ColourGradient light (juce::Colours::white.withAlpha (0.16f), pa.getX() + pa.getWidth() * 0.25f, pa.getY(), juce::Colours::transparentWhite,
+                                    pa.getX() + pa.getWidth() * 0.25f, pa.getY() + pa.getHeight() * 0.9f, true);
+        bg.setGradientFill (light);
+        bg.fillRect (pa);
+        juce::ColourGradient deep (juce::Colours::transparentBlack, pa.getCentreX(), pa.getCentreY(), juce::Colours::black.withAlpha (0.28f), pa.getRight(),
+                                   pa.getBottom(), false);
+        bg.setGradientFill (deep);
+        bg.fillRect (pa);
+        // our own motif: wide rings spreading from the valve window
+        const juce::Point<float> vc (183.0f, 254.0f);
+        juce::Path band;
+        band.addEllipse (juce::Rectangle<float> (520, 520).withCentre (vc));
+        band.addEllipse (juce::Rectangle<float> (430, 430).withCentre (vc));
+        band.setUsingNonZeroWinding (false);
+        bg.setColour (juce::Colours::white.withAlpha (0.045f));
+        bg.fillPath (band);
+        bg.setColour (juce::Colours::white.withAlpha (0.16f));
+        bg.drawEllipse (juce::Rectangle<float> (600, 600).withCentre (vc), 1.2f);
+        bg.drawEllipse (juce::Rectangle<float> (430, 430).withCentre (vc), 1.0f);
+    }
+    bg.setColour (juce::Colours::white.withAlpha (0.22f));
+    bg.drawRoundedRectangle (pa.reduced (1.0f), 11.0f, 1.0f);
+    bg.setColour (juce::Colours::black.withAlpha (0.55f));
+    bg.drawRoundedRectangle (pa, 12.0f, 1.5f);
+    for (auto pt : { juce::Point<float> (28, 22), juce::Point<float> (kWidth - 28.0f, 22), juce::Point<float> (28, kHeight - 22.0f),
+                     juce::Point<float> (kWidth - 28.0f, kHeight - 22.0f) })
+    {
+        const int px = (int) std::ceil (10 * sc);
+        materials::drawAt (bg, materials::cached ("vbscrew:" + juce::String (px), [=] { return materials::screw (px, 0.4f); }),
+                           juce::Rectangle<float> (10, 10).withCentre (pt));
+    }
+
+    // the name
+    {
+        juce::GlyphArrangement ga;
+        ga.addLineOfText (keyFont (34.0f), "valvebox", 0, 0);
+        juce::Path word;
+        ga.createPath (word);
+        word.applyTransform (juce::AffineTransform::translation (44, 44));
+        bg.setColour (juce::Colours::black.withAlpha (0.25f));
+        bg.fillPath (word, juce::AffineTransform::translation (0.0f, 1.5f));
+        bg.setColour (colours::print);
+        bg.fillPath (word);
+        auto tag = juce::Rectangle<float> (196, 24, 50, 18);
+        bg.fillRoundedRectangle (tag, 3.0f);
+        printInk (bg, "VB-16", tag, 13.0f, colours::panelDark);
+        printInk (bg, "GROOVE PRODUCTION STATION", { 254, 24, 300, 18 }, 13.0f, colours::print, juce::Justification::centredLeft);
+    }
+
+    // the cream sub-panels: the display, and the transport strip
+    auto creamPanel = [&] (juce::Rectangle<float> r) {
+        bg.setColour (juce::Colours::black.withAlpha (0.35f));
+        bg.fillRoundedRectangle (r.translated (0.0f, 2.0f).expanded (1.0f), 11.0f);
+        const auto& tile = materials::cached ("vbcream", [] { return materials::paintTile (colours::creamPanel, 240, 0.7f, 17); });
+        bg.setFillType (juce::FillType (tile, juce::AffineTransform::scale (1.0f / sc)));
+        bg.fillRoundedRectangle (r, 10.0f);
+        bg.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.18f), 0, r.getY(), juce::Colours::black.withAlpha (0.06f), 0, r.getBottom(), false));
+        bg.fillRoundedRectangle (r, 10.0f);
+        bg.setColour (juce::Colours::white.withAlpha (0.6f));
+        bg.drawRoundedRectangle (r.reduced (1.0f), 9.0f, 1.0f);
+        bg.setColour (juce::Colours::black.withAlpha (0.3f));
+        bg.drawRoundedRectangle (r, 10.0f, 1.0f);
+    };
+    creamPanel ({ 338, 54, 494, 190 });
+    creamPanel ({ 30, 452, 548, 120 });
+
+    // silk-screened sections: white rules with a title tab
+    auto section = [&] (juce::Rectangle<float> r, const juce::String& title) {
+        bg.setColour (colours::print.withAlpha (0.8f));
+        bg.drawRoundedRectangle (r, 8.0f, 1.3f);
+        if (title.isNotEmpty())
+        {
+            const float w = juce::GlyphArrangement::getStringWidth (panelFont (12.5f, true), title) + 22.0f;
+            auto t = juce::Rectangle<float> (r.getX() + 12, r.getY() - 9, w, 18);
+            bg.setColour (colours::print);
+            bg.fillRoundedRectangle (t, 4.0f);
+            printInk (bg, title, t, 12.5f, colours::panelDark);
+        }
+    };
+    section ({ 830, 58, 274, 190 }, "EFFECT");
+    section ({ 1106, 58, 228, 190 }, "MODULATION");
+    section ({ 1336, 58, 244, 190 }, "SYNTH OSCILLATOR");
+    section ({ 830, 260, 372, 170 }, "PART COMMON");
+    section ({ 1206, 260, 374, 170 }, "SYNTH FILTER");
+    section ({ 592, 456, 580, 116 }, "DRUM PART");
+    section ({ 1176, 456, 334, 116 }, "SYNTH PART");
+    section ({ 1334, 588, 232, 190 }, "ARPEGGIATOR");
+    bg.setColour (colours::print.withAlpha (0.8f));
+    bg.fillRect (juce::Rectangle<float> (390, 658, 926, 1.3f)); // the rule over the step keys
+    print (bg, "FX MOTION", { 838, 412, 70, 14 }, 9.5f, juce::Justification::centred, true, true);
+    for (int i = 0; i < 8; ++i)
+        print (bg, juce::String (i + 1), { 304.0f + i * 56 + 17, 604, 20, 42 }, 11.0f, juce::Justification::centredLeft, true, true);
+    print (bg, "STEP KEYS  /  KEYBOARD", { 226, 652, 300, 14 }, 11.5f, juce::Justification::centredLeft, false, true);
+
+    // what stands on the panel casts shadows, and every key sits in a well
+    for (auto& w : knobs)
+    {
+        const auto k = w->knobArea() + w->getPosition().toFloat();
+        materials::roundShadow (bg, k.getCentre(), k.getWidth() * 0.48f, k.getWidth() * 0.22f, 0.9f);
+    }
+    {
+        const auto k = dial.knobArea() + dial.getPosition().toFloat();
+        materials::roundShadow (bg, k.getCentre(), k.getWidth() * 0.48f, k.getWidth() * 0.2f, 0.8f);
+    }
+    for (auto& w : keys)
+    {
+        const auto cap = w->capArea() + w->getPosition().toFloat();
+        const float corner = w->capCorner();
+        juce::Path p;
+        p.addRoundedRectangle (cap, corner);
+        juce::DropShadow (juce::Colours::black.withAlpha (w->onCream ? 0.35f : 0.5f), 7, { 1, 3 }).drawForPath (bg, p);
+        bg.setColour (juce::Colours::black.withAlpha (w->onCream ? 0.32f : 0.5f));
+        bg.fillRoundedRectangle (cap.expanded (2.0f), corner + 2.0f);
+        bg.setColour (juce::Colours::white.withAlpha (w->onCream ? 0.5f : 0.16f));
+        bg.drawRoundedRectangle (cap.expanded (2.6f).translated (0.0f, 0.6f), corner + 2.6f, 0.8f);
+    }
 }
 
 // ---------------------------------------------------------------- keys, sync
@@ -533,7 +638,7 @@ void MainComponent::timerCallback()
     if (engineMessageUntil != 0 && juce::Time::getMillisecondCounter() > engineMessageUntil)
     {
         engineMessageUntil = 0;
-        canvas.repaint (350, 428, 470, 20);
+        canvas.repaint (kMessageArea.expanded (2));
     }
 }
 
@@ -707,8 +812,8 @@ void MainComponent::loadSettings()
     o.filenameSuffix = ".settings";
     o.osxLibrarySubFolder = "Application Support";
     o.folderName = "Valvebox";
-    if (std::getenv ("VALVEBOX_SELFTEST") != nullptr)
-        return; // the self-test leaves the user's settings alone
+    if (std::getenv ("VALVEBOX_SELFTEST") != nullptr || std::getenv ("VALVEBOX_SNAPSHOT") != nullptr)
+        return; // the self-test and snapshots leave the user's settings alone
     settings = std::make_unique<juce::PropertiesFile> (o);
     if (auto xml = settings->getXmlValue ("audioDevice"))
         engine.getDeviceManager().initialise (0, 2, xml.get(), true);

@@ -13,7 +13,7 @@ Valvebox uses an original name and panel design. It doesn't use any manufacturer
 
 C++20 / JUCE 8, macOS (Apple Silicon tested). The engine and panel logic are platform-neutral and unit-tested.
 
-![Valvebox playing the A.02 House1 pattern, with TUBE GAIN up and the valves glowing](docs/valvebox.png)
+![Valvebox playing the A.02 House1 pattern, with TUBE GAIN up and the valves glowing](docs/valvebox.jpg)
 
 The research behind it, with page references to the original owner's manual and other sources, is in [docs/research.md](docs/research.md).
 
@@ -82,7 +82,7 @@ The keyboard works as soon as the window is in front. Keys still held when you s
 - **Knobs:** drag up or down, or scroll.
 - **Dial:** drag or scroll. Each detent is one click.
 - **Ribbon:** press and drag on it. The **slider** sits beside it.
-- **Modifier keys latch with a click:** SHIFT, PART MUTE, SOLO and PATTERN SET. A pointer can't hold two panel keys at once, so clicking one of these keys holds it, and it stays lit until you click it again. SHIFT is one-shot: it lets go after the next key.
+- **Modifier keys latch with a click:** SHIFT, PART MUTE, SOLO and PATTERN SET. A pointer can't hold two panel keys at once, so clicking one of these keys holds it: it stays pressed in, with an orange ring, until you click it again. SHIFT is one-shot: it lets go after the next key.
 
 ### MIDI
 
@@ -255,6 +255,7 @@ Other testing aids:
 - `VALVEBOX_MEMORY_DIR=/some/dir` keeps your real memory out of a test session.
 - `VALVEBOX_CAPTURE_WAV=/path.wav` records the first 30 s of output.
 - `VALVEBOX_WINDOW_SIZE=WxH` forces a window size.
+- `VALVEBOX_SNAPSHOT=/path.png` renders the panel at 2× to a PNG and quits (add `VALVEBOX_SNAPSHOT_PLAY=1` to play a pattern first, so the lights and valves are on).
 
 ## Source layout
 
@@ -262,5 +263,5 @@ Other testing aids:
 |---|---|
 | `src/core` | The instrument, with no UI: `Model` (patterns, songs, memory, JSON), `Mapping` (the manual's tables), `Waves`, `Voices`, `Effects` and `Rack` (the sound), `Edit` (pattern operations), and `Machine` / `MachinePlay` (panel logic and sequencer). |
 | `src/engine` | Audio and MIDI devices, the memory file, card file jobs. |
-| `src/ui` | The panel: widgets, layout on a 1600 × 1000 canvas that scales with the window, the lit materials. |
+| `src/ui` | The panel: widgets, layout on a 1600 × 810 canvas that scales with the window, the rendered materials (aluminium knobs, rubber keys, metallic paint), the LCD's dot-matrix font. |
 | `tests` | The unit tests. |

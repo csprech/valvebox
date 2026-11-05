@@ -5,7 +5,7 @@
 
 namespace valvebox::ui
 {
-/** The panel, laid out on a fixed 1600 x 1000 canvas that scales with the window. */
+/** The panel, laid out on a fixed 1600 x 810 canvas that scales with the window. */
 class MainComponent : public juce::Component, private juce::Timer
 {
 public:
@@ -22,7 +22,7 @@ public:
     /** Before the window closes: settings. */
     void prepareToQuit();
 
-    static constexpr int kWidth = 1600, kHeight = 1000;
+    static constexpr int kWidth = 1600, kHeight = 810;
 
 private:
     struct Canvas : public juce::Component
@@ -35,6 +35,7 @@ private:
     void build();
     void layout();
     void paintPanel (juce::Graphics&);
+    void paintBackground (juce::Graphics&, float scale);
     void pressKey (Key k);
     void releaseKey (Key k);
     void showHelp();
@@ -62,6 +63,7 @@ private:
     RibbonWidget ribbonW;
     SliderWidget sliderW;
     ValveWindow valves;
+    PanelButtonLook buttonLook; // (declared before the buttons: it outlives them)
     juce::TextButton audioBtn { "AUDIO/MIDI" }, helpBtn { "HELP" };
     juce::String engineMessage;
     uint32_t engineMessageUntil = 0;

@@ -48,6 +48,14 @@ juce::Image screw (int diameter, float angle);
 /** A knurled black knob with a white indicator; lighting stays fixed while it turns. */
 juce::Image knob (int diameter, float angle, juce::Colour cap = juce::Colour (0xff1a1a1a));
 
+/** A turned aluminium knob seen from above: a tapered side, a lathe-brushed flat top with a chamfer, and an engraved
+    pointer line at `angle` (0 = up). With `knurled`, the rim carries fine grip ridges that turn with the angle and
+    there's no pointer (the data dial). */
+juce::Image metalKnob (int diameter, float angle, bool knurled = false);
+
+/** Tileable metallic paint: the base colour with fine aluminium flake that glints (opaque). */
+juce::Image flakeTile (juce::Colour base, int size, uint32_t seed = 7);
+
 /** Cream data wheel (no dimple); phase turns the knurled edge. */
 juce::Image wheel (int diameter, float knurlPhase);
 

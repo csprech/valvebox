@@ -36,7 +36,7 @@ public:
             setUsingNativeTitleBar (true);
             setContentOwned (new ui::MainComponent (eng), true);
             setResizable (true, true);
-            setResizeLimits (960, 600, 3200, 2000);
+            setResizeLimits (960, 500, 3200, 2000); // (the panel keeps its proportions inside any size)
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
             if (auto* c = getContentComponent())

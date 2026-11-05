@@ -262,6 +262,87 @@ juce::Image knob (int d, float angle, juce::Colour capColour)
     return renderField (d, d, heightFn, coverage, albedo, s);
 }
 
+juce::Image metalKnob (int d, float angle, bool knurled)
+{
+    const float R = d * 0.5f;
+    const float topR = R * (knurled ? 0.80f : 0.84f), chamfer = R * 0.07f, H = R * 0.55f;
+    const int ridges = 48;
+    const float ca = std::cos (-angle), sa = std::sin (-angle);
+    auto rim = [=] (float theta) { return knurled ? R * (0.975f + 0.025f * std::cos (ridges * (theta - angle))) : R; };
+    auto heightFn = [=] (float x, float y) {
+        const float px = x - R, py = y - R;
+        const float r = std::hypot (px, py);
+        const float theta = std::atan2 (px, -py);
+        if (r > topR)
+        {
+            // the tapered side, steep near the panel, rounding over into the chamfer
+            const float t = juce::jlimit (0.0f, 1.0f, (rim (theta) - r) / (rim (theta) - topR));
+            float h = (H - chamfer * 0.4f) * std::pow (t, 0.75f);
+            if (knurled)
+                h += R * 0.035f * (0.5f + 0.5f * std::cos (ridges * (theta - angle))) * t;
+            return h;
+        }
+        // the top: a chamfered edge, then flat with fine concentric turning marks
+        const float e = roundOver ((topR - r) / chamfer);
+        const float turning = R * 0.0035f * (valueNoise (r * 1.1f, 3.0f, 21) - 0.5f) + R * 0.0015f * std::sin (r * 2.4f);
+        float h = H - chamfer * 0.4f + chamfer * 0.4f * e + turning * e;
+        if (! knurled)
+        {
+            // the pointer: an engraved groove from near the centre to the edge
+            const float u = px * ca - py * sa, v = px * sa + py * ca;
+            const float w = R * 0.045f;
+            if (v < -topR * 0.18f && v > -topR * 0.97f)
+                h -= R * 0.03f * juce::jlimit (0.0f, 1.0f, (w - std::abs (u)) / (w * 0.6f));
+        }
+        return h;
+    };
+    auto coverage = [=] (float x, float y) {
+        const float px = x - R, py = y - R;
+        return juce::jlimit (0.0f, 1.0f, rim (std::atan2 (px, -py)) - std::hypot (px, py) + 0.5f);
+    };
+    auto onPointer = [=] (float x, float y) {
+        if (knurled)
+            return 0.0f;
+        const float px = x - R, py = y - R;
+        const float u = px * ca - py * sa, v = px * sa + py * ca;
+        const float w = R * 0.045f;
+        if (v >= -topR * 0.18f || v <= -topR * 0.97f)
+            return 0.0f;
+        return juce::jlimit (0.0f, 1.0f, (w - std::abs (u)) / 1.0f + 0.5f);
+    };
+    auto albedo = [=] (float x, float y) {
+        const float r = std::hypot (x - R, y - R);
+        const float n = 1.0f + 0.05f * (hash ((int) x, (int) y, 31) - 0.5f);
+        // the side is bead-blasted a shade darker than the turned top
+        const float base = (r > topR ? 0.66f : 0.80f) * n;
+        const float p = onPointer (x, y);
+        const float v = base * (1.0f - p) + 0.10f * p; // the groove is filled with black paint
+        return Rgb { v * 0.98f, v * 0.99f, v * 1.02f };
+    };
+    auto specMask = [=] (float x, float y) { return 1.0f - 0.85f * onPointer (x, y); };
+    Shading s = { 0.42f, 0.58f, 0.55f, 16.0f, 0.0f, 0.0f, 1.0f };
+    return renderField (d, d, heightFn, coverage, albedo, s, specMask);
+}
+
+juce::Image flakeTile (juce::Colour baseColour, int size, uint32_t seed)
+{
+    juce::Image img (juce::Image::ARGB, size, size, false);
+    juce::Image::BitmapData bd (img, juce::Image::BitmapData::writeOnly);
+    const Rgb base = toRgb (baseColour);
+    for (int y = 0; y < size; ++y)
+        for (int x = 0; x < size; ++x)
+        {
+            // a soft mottle (paint thickness), fine grain, and flakes: most dim, a few that catch the light
+            const float mottle = valueNoise (x / 9.0f, y / 9.0f, seed, size / 9 > 0 ? size / 9 : 1) - 0.5f;
+            const float grain = hash (x, y, seed + 1) - 0.5f;
+            const float f = hash (x, y, seed + 2);
+            const float flake = f > 0.985f ? 0.35f * (f - 0.985f) / 0.015f + 0.12f : f > 0.93f ? 0.06f : 0.0f;
+            const float k = 1.0f + 0.05f * mottle + 0.06f * grain;
+            put (bd, x, y, { base.r * k + flake * 0.85f, base.g * k + flake * 0.9f, base.b * k + flake }, 1.0f);
+        }
+    return img;
+}
+
 juce::Image paintTile (juce::Colour baseColour, int size, float roughness, uint32_t seed)
 {
     const Rgb base = toRgb (baseColour);
