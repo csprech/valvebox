@@ -1,9 +1,9 @@
 #pragma once
 
-// The panel's parts: aluminium knobs, the two 16-way selectors, cream rubber keys that glow when lit, indicator
+// The panel's parts: aluminium knobs, the two 16-way selectors, extruded rubber keys that glow when lit, indicator
 // lamps, the data dial, the amber dot-matrix LCD, the ribbon and slider, and the valve window.
 //
-// Shadows and key wells are static, so the panel background draws them (from capArea() / knobArea()); the widgets
+// Shadows and key wells are static, so the panel background draws them (from faceArea() / knobArea()); the widgets
 // draw only what moves or lights.
 
 #include "core/Machine.h"
@@ -18,12 +18,13 @@ namespace colours
     const juce::Colour panelDark { 0xff12397c };
     const juce::Colour print { 0xfff3f6fb };     // white silk-screen
     const juce::Colour printDim { 0xffbfd0ea };
-    const juce::Colour cream { 0xffe8e3d4 };     // the rubber keys
-    const juce::Colour creamPanel { 0xffe3decf }; // the display and transport sub-panels
+    const juce::Colour keyFace { 0xffe2e3e3 };   // the rubber keys: the top...
+    const juce::Colour keySideTop { 0xffb8bbc0 }; // ...and the walls, lit from above
+    const juce::Colour keySideBottom { 0xff8d9299 };
+    const juce::Colour darkFace { 0xff26272b };
+    const juce::Colour creamPanel { 0xffe6e3da }; // the display and transport sub-panels
     const juce::Colour creamInk { 0xff24272c };  // print on cream
-    const juce::Colour creamInkDim { 0xff62656c };
     const juce::Colour keyInk { 0xff1b1d22 };
-    const juce::Colour transportKey { 0xff2a2b30 };
     const juce::Colour lit { 0xffff3a28 };       // a key lit from inside
     const juce::Colour ledRed { 0xffff3b2f }, ledOrange { 0xffff9a1f }, ledGreen { 0xff52ff5a }, ledYellow { 0xffffd84a };
     const juce::Colour lcdBack { 0xffffa63c }, lcdInk { 0xff2a1305 };
@@ -37,8 +38,10 @@ void print (juce::Graphics& g, const juce::String& t, juce::Rectangle<float> r, 
             bool dim = false, bool bold = false);
 void printInk (juce::Graphics& g, const juce::String& t, juce::Rectangle<float> r, float h, juce::Colour ink,
                juce::Justification j = juce::Justification::centred, bool bold = true, int maxLines = 1);
+/** A white tag with blue lettering (boxed knob labels, section bands). */
+void printTag (juce::Graphics& g, const juce::String& t, juce::Rectangle<float> r, float h);
 
-/** A knob 0..127 (bipolar knobs show a centre mark). Drag up/down, or scroll. */
+/** A knob 0..127 (bipolar knobs show a centre mark), its label above it. Drag up/down, or scroll. */
 class KnobWidget : public juce::Component
 {
 public:
@@ -53,6 +56,13 @@ public:
     juce::String getLabel() const { return label; }
     /** Where the knob itself is, in this component. */
     virtual juce::Rectangle<float> knobArea() const;
+    /** The knob's size; 0 = as big as the component allows. */
+    float diameter = 0.0f;
+    /** The label in a white tag (as on the synth sections). */
+    bool boxedLabel = false;
+    static constexpr float kLabelHeight = 17.0f;
+    /** Bounds that put a knob of diameter d at (cx, cy) with its label above. */
+    static juce::Rectangle<int> boundsFor (float cx, float cy, float d, float width = 0.0f);
 
 protected:
     juce::String label;
@@ -60,7 +70,7 @@ protected:
     int value = 64, dragStart = 64;
 };
 
-/** A 16-way rotary selector with its choices printed beside it (FX TYPE, OSC TYPE). */
+/** A 16-way rotary selector with its choices printed round it (FX TYPE, OSC TYPE). */
 class SelectorWidget : public KnobWidget
 {
 public:
@@ -73,18 +83,20 @@ private:
     juce::StringArray choices;
 };
 
-/** A rubber key. Its function is printed on it (or an icon, on the transport keys); the SHIFT function above it
-    (below, on the step keys). Keys with a light glow red from inside when lit. */
+/** An extruded rubber key: a flat top standing proud of the panel on visible walls; pressing it sinks it. Its
+    function is printed on top (an icon on the transport keys), the SHIFT function above it (below the step keys).
+    Keys with a light glow red from inside when lit. */
 class KeyWidget : public juce::Component
 {
 public:
     enum class Style
     {
         Pill,      // small function keys
+        DarkPill,  // KEYBOARD
         Square,    // part keys, TAP, PART MUTE, SOLO
         Step,      // the step keys...
         StepSharp, // ...the ones on a keyboard's black notes have a black label plate
-        Transport, // the dark keys with symbols: RESET, REC, STOP, PLAY
+        Transport, // the black-faced keys with symbols: RESET, REC, STOP, PLAY
         Round      // SHIFT
     };
     KeyWidget (Key k, const juce::String& label, const juce::String& shiftLabel = {}, Style style = Style::Pill, bool hasLed = true);
@@ -102,13 +114,19 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     juce::String getLabel() const { return label; }
-    /** The key cap, in this component (at rest). */
-    juce::Rectangle<float> capArea() const;
-    float capCorner() const;
+    /** The key's top face at rest, in this component. */
+    juce::Rectangle<float> faceArea() const;
+    float faceCorner() const;
+    /** How far the key stands out of the panel. */
+    float extrusion() const;
     Style getStyle() const { return style; }
+    /** Component bounds that put this key's top face at `face` (in the parent). */
+    juce::Rectangle<int> boundsFor (juce::Rectangle<float> face) const;
 
 private:
-    void paintLabel (juce::Graphics&, juce::Rectangle<float> cap, bool on);
+    void paintLabel (juce::Graphics&, juce::Rectangle<float> face, bool on);
+    bool labelBelow() const { return style == Style::Step || style == Style::StepSharp; }
+    static constexpr float kMargin = 7.0f, kTopLabel = 15.0f, kBottomLabel = 30.0f;
     juce::String label, shiftLabel;
     Style style;
     bool hasLed;
@@ -126,6 +144,8 @@ public:
     void setBlinkPhase (bool on) { if (blinkOn != on) { blinkOn = on; if (state == Led::Blink) repaint(); } }
     void paint (juce::Graphics&) override;
     bool onCream = false;
+    /** Bounds that put the LED's centre at (x, y), with room for its label to the right. */
+    static juce::Rectangle<int> boundsFor (float x, float y, float labelWidth);
 
 private:
     juce::String label;
@@ -151,20 +171,23 @@ private:
     int lastY = 0;
 };
 
-/** The backlit LCD: two lines of 8 dot-matrix characters (parameter, value), the indicators, the input meter,
-    the part status rows. */
+/** The backlit LCD: two lines of 8 dot-matrix characters (parameter, value), the indicators and input meter beside
+    them, and the part status row (the part numbers are printed on the panel under it). */
 class LcdWidget : public juce::Component
 {
 public:
     void setDisplay (const Display& d, bool blinkPhase);
     void paint (juce::Graphics&) override;
+    /** Where each of the 16 part status segments sits (x, in this component), for the print under the LCD. */
+    float segmentCentre (int part) const;
 
 private:
+    juce::Rectangle<float> statusArea() const;
     Display shown;
     bool blinkOn = true;
 };
 
-/** Ribbon controller (touch + position) and the arpeggiator slider. */
+/** The ribbon controller: a tall touch strip; where you touch, from the bottom (0) to the top (1). */
 class RibbonWidget : public juce::Component
 {
 public:
@@ -173,7 +196,6 @@ public:
     void mouseDown (const juce::MouseEvent& e) override { touch (e, true); }
     void mouseDrag (const juce::MouseEvent& e) override { touch (e, true); }
     void mouseUp (const juce::MouseEvent& e) override { touch (e, false); }
-    juce::Rectangle<float> padArea() const;
 
 private:
     void touch (const juce::MouseEvent& e, bool on);
@@ -181,6 +203,7 @@ private:
     bool touching = false;
 };
 
+/** The arpeggiator slider, with its scale. */
 class SliderWidget : public juce::Component
 {
 public:
@@ -203,7 +226,7 @@ public:
     void drawButtonText (juce::Graphics&, juce::TextButton&, bool highlighted, bool down) override;
 };
 
-/** The oval window, its grille and the two glowing tubes; the glow follows TUBE GAIN and the output. */
+/** The oval window and the two glowing tubes behind its glass; the glow follows TUBE GAIN and the output. */
 class ValveWindow : public juce::Component
 {
 public:

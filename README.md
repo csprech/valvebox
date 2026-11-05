@@ -81,7 +81,7 @@ The keyboard works as soon as the window is in front. Keys still held when you s
 
 - **Knobs:** drag up or down, or scroll.
 - **Dial:** drag or scroll. Each detent is one click.
-- **Ribbon:** press and drag on it. The **slider** sits beside it.
+- **Ribbon:** the tall strip at the bottom left; press and drag on it (bottom to top). The **slider** sits beside it.
 - **Modifier keys latch with a click:** SHIFT, PART MUTE, SOLO and PATTERN SET. A pointer can't hold two panel keys at once, so clicking one of these keys holds it: it stays pressed in, with an orange ring, until you click it again. SHIFT is one-shot: it lets go after the next key.
 
 ### MIDI
@@ -108,7 +108,7 @@ The keyboard works as soon as the window is in front. Keys still held when you s
 
 ## The panel
 
-The layout follows the original's sections:
+The layout follows the original's panel, section by section and in the same arrangement: the valve window at the top, the display panel and transport strip on the left, the sound sections on the right, the arpeggiator at the bottom left, and the part keys and step keys on one 16-column grid. The keys are extruded blocks that stand out of the panel and sink when pressed.
 
 - **Common section:**
   - Knobs: MASTER VOLUME, TUBE GAIN, AUDIO IN LEVEL.
@@ -117,7 +117,7 @@ The layout follows the original's sections:
 - **LCD:**
   - Parameter and value.
   - PATTERN / SONG / WAVE / KNOB / ORIGINAL / CLIP indicators and the input meter.
-  - Four status rows for all 16 parts: PLAY, SWING, ACCENT and OUT L/R.
+  - A status row for all 16 parts (the part numbers are printed under the LCD), showing PLAY, SWING, ACCENT or OUT L/R as the page needs.
 - **Dial and cursor keys**, the BEAT lamp, **WRITE/RENAME**, and the six **mode keys**. Each mode key has its matrix menu printed below the LCD. The current page is highlighted.
 - **EFFECT:**
   - TYPE, a 16-way selector: Reverb, BPM Delay, Shift Delay, Mod Delay, Grain Shifter, Chorus/Flanger, Phaser, Ring Mod, Talk Mod, Pitch Shifter, Compressor, Distortion, Decimator, EQ, LPF, HPF.
@@ -140,7 +140,7 @@ The layout follows the original's sections:
 - **Select keys and LEDs:**
   - The green row shows the bar playing.
   - The red row shows the bar being edited, the keyboard octave or the pattern-set group.
-- **Step keys:** 16 keys laid out like a piano octave.
+- **Step keys:** 16 keys in a row. The ones on a keyboard's black notes carry black label plates, so in KEYBOARD mode they read as an octave.
   - **SHIFT + a step key** runs the function printed under it. 1–8 work in the pattern modes while stopped, 9–11 in SONG mode, 12 in MIDI mode and 13 in GLOBAL mode:
     1. LAST STEP
     2. MOVE DATA
@@ -263,5 +263,5 @@ Other testing aids:
 |---|---|
 | `src/core` | The instrument, with no UI: `Model` (patterns, songs, memory, JSON), `Mapping` (the manual's tables), `Waves`, `Voices`, `Effects` and `Rack` (the sound), `Edit` (pattern operations), and `Machine` / `MachinePlay` (panel logic and sequencer). |
 | `src/engine` | Audio and MIDI devices, the memory file, card file jobs. |
-| `src/ui` | The panel: widgets, layout on a 1600 × 810 canvas that scales with the window, the rendered materials (aluminium knobs, rubber keys, metallic paint), the LCD's dot-matrix font. |
+| `src/ui` | The panel: widgets, the layout (a 1500 × 1090 canvas in the original's proportions and arrangement, scaled to the window), the rendered materials (aluminium knobs, extruded rubber keys, metallic paint), the LCD's dot-matrix font. |
 | `tests` | The unit tests. |

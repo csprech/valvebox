@@ -5,7 +5,7 @@
 
 namespace valvebox::ui
 {
-/** The panel, laid out on a fixed 1600 x 810 canvas that scales with the window. */
+/** The panel, laid out on a fixed 1500 x 1090 canvas (the original's proportions) that scales with the window. */
 class MainComponent : public juce::Component, private juce::Timer
 {
 public:
@@ -22,7 +22,7 @@ public:
     /** Before the window closes: settings. */
     void prepareToQuit();
 
-    static constexpr int kWidth = 1600, kHeight = 810;
+    static constexpr int kWidth = 1500, kHeight = 1090;
 
 private:
     struct Canvas : public juce::Component

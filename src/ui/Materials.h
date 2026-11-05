@@ -39,6 +39,10 @@ const juce::Image& cached (const juce::String& key, const std::function<juce::Im
 juce::Image pillow (int w, int h, float corner, float bevel, float dome, juce::Colour albedo, const Shading& s,
                     uint32_t seed = 1, float wear = 0.0f);
 
+/** The flat top face of an extruded key: level all over, with a small rounded fillet at the edge that catches the
+    light on the top-left and falls into shade on the bottom-right, and a fine matt grain. */
+juce::Image keyFace (int w, int h, float corner, float fillet, juce::Colour albedo, uint32_t seed = 3);
+
 /** A domed LED lens in a black bezel. */
 juce::Image led (int diameter, juce::Colour colour, bool on);
 

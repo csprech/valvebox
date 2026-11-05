@@ -155,6 +155,25 @@ juce::Image pillow (int w, int h, float corner, float bevel, float dome, juce::C
     return renderField (w, h, heightFn, coverage, albedo, s, specMask);
 }
 
+juce::Image keyFace (int w, int h, float corner, float fillet, juce::Colour albedoColour, uint32_t seed)
+{
+    const float hw = w * 0.5f, hh = h * 0.5f;
+    const Rgb base = toRgb (albedoColour);
+    auto inside = [=] (float x, float y) { return -sdRoundRect (x - hw, y - hh, hw - 0.5f, hh - 0.5f, corner); };
+    auto heightFn = [=] (float x, float y) {
+        const float d = inside (x, y);
+        const float edge = juce::jlimit (0.0f, 1.0f, d / fillet);
+        return fillet * roundOver (d / fillet) + 0.12f * (valueNoise (x * 0.8f, y * 0.8f, seed) - 0.5f) * edge;
+    };
+    auto coverage = [=] (float x, float y) { return juce::jlimit (0.0f, 1.0f, inside (x, y) + 0.5f); };
+    auto albedo = [=] (float x, float y) {
+        const float g = 1.0f + 0.022f * (hash ((int) x, (int) y, seed + 11) - 0.5f) * 2.0f;
+        return Rgb { base.r * g, base.g * g, base.b * g };
+    };
+    const Shading s { 0.56f, 0.46f, 0.08f, 9.0f, 0.0f, 0.0f, 1.0f };
+    return renderField (w, h, heightFn, coverage, albedo, s);
+}
+
 juce::Image led (int d, juce::Colour c, bool on)
 {
     const float R = d * 0.5f, lensR = R * 0.74f;

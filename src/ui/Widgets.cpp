@@ -39,6 +39,13 @@ void printInk (juce::Graphics& g, const juce::String& t, juce::Rectangle<float> 
     g.drawFittedText (t, r.toNearestInt(), j, maxLines, 0.75f);
 }
 
+void printTag (juce::Graphics& g, const juce::String& t, juce::Rectangle<float> r, float h)
+{
+    g.setColour (colours::print);
+    g.fillRoundedRectangle (r, 2.0f);
+    printInk (g, t, r, h, colours::panelDark);
+}
+
 namespace
 {
     constexpr float kStart = -2.4f, kEnd = 2.4f;
@@ -51,16 +58,20 @@ namespace
                                   [=] { return materials::metalKnob (px, step * (kEnd - kStart) / 127.0f, knurled); });
     }
 
-    void scaleDots (juce::Graphics& g, juce::Point<float> c, float R, int n, bool centreMark, juce::Colour ink, bool between = false)
+    /** The printed scale round a knob: an arc with ticks (n of them; `between` puts them between the ends). */
+    void knobScale (juce::Graphics& g, juce::Point<float> c, float R, int n, bool centreMark, bool between = false)
     {
-        g.setColour (ink.withAlpha (0.9f));
+        g.setColour (colours::print.withAlpha (0.88f));
+        juce::Path arc;
+        arc.addCentredArc (c.x, c.y, R, R, 0.0f, kStart, kEnd, true);
+        g.strokePath (arc, juce::PathStrokeType (1.1f));
         for (int i = 0; i < n; ++i)
         {
             const float t = between ? (i + 0.5f) / (float) n : (float) i / (float) (n - 1);
             const float a = kStart + (kEnd - kStart) * t;
-            const bool big = ! between && (i == 0 || i == n - 1 || (centreMark && i == n / 2));
-            const float rr = big ? 1.9f : 1.15f;
-            g.fillEllipse (juce::Rectangle<float> (rr * 2, rr * 2).withCentre ({ c.x + std::sin (a) * R, c.y - std::cos (a) * R }));
+            const bool major = ! between && (i == 0 || i == n - 1 || (centreMark && i == n / 2));
+            const float r1 = R + (major ? 5.0f : 3.2f);
+            g.drawLine (c.x + std::sin (a) * R, c.y - std::cos (a) * R, c.x + std::sin (a) * r1, c.y - std::cos (a) * r1, major ? 1.6f : 1.0f);
         }
     }
 } // namespace
@@ -68,6 +79,13 @@ namespace
 // ---------------------------------------------------------------- knob
 
 KnobWidget::KnobWidget (const juce::String& l, bool bi) : label (l), bipolar (bi) {}
+
+juce::Rectangle<int> KnobWidget::boundsFor (float cx, float cy, float d, float width)
+{
+    const float w = width > 0.0f ? width : std::max (d * 1.9f, 96.0f);
+    const float h = kLabelHeight + d * 1.5f;
+    return juce::Rectangle<float> (cx - w * 0.5f, cy - kLabelHeight - d * 0.75f, w, h).getSmallestIntegerContainer();
+}
 
 void KnobWidget::setValue (int v)
 {
@@ -81,9 +99,8 @@ void KnobWidget::setValue (int v)
 
 juce::Rectangle<float> KnobWidget::knobArea() const
 {
-    auto r = getLocalBounds().toFloat();
-    r.removeFromBottom (17.0f);
-    const float d = std::min (r.getWidth(), r.getHeight()) * 0.70f;
+    auto r = getLocalBounds().toFloat().withTrimmedTop (kLabelHeight);
+    const float d = diameter > 0.0f ? diameter : std::min (r.getWidth(), r.getHeight()) * 0.66f;
     return juce::Rectangle<float> (d, d).withCentre (r.getCentre());
 }
 
@@ -92,11 +109,19 @@ void KnobWidget::paint (juce::Graphics& g)
     const auto k = knobArea();
     const auto c = k.getCentre();
     const float R = k.getWidth() * 0.5f;
-    scaleDots (g, c, R * 1.24f, 11, bipolar, colours::print);
+    knobScale (g, c, R * 1.22f, 11, bipolar);
     const float angle = kStart + (kEnd - kStart) * value / 127.0f;
     const float sc = materials::scaleOf (g);
     materials::drawAt (g, knobImage ((int) std::ceil (k.getWidth() * sc), angle), k);
-    print (g, label, getLocalBounds().toFloat().removeFromBottom (17.0f), 11.5f, juce::Justification::centred, false, true);
+    // the label, just above the scale
+    auto lr = juce::Rectangle<float> (0.0f, k.getY() - R * 0.22f - 6.0f - kLabelHeight + 2.0f, (float) getWidth(), kLabelHeight - 2.0f);
+    if (boxedLabel)
+    {
+        const float w = juce::GlyphArrangement::getStringWidth (panelFont (11.0f, true), label) + 14.0f;
+        printTag (g, label, lr.withSizeKeepingCentre (std::min (w, lr.getWidth()), lr.getHeight()), 11.0f);
+    }
+    else
+        print (g, label, lr, 11.0f, juce::Justification::centred, false, true);
 }
 
 void KnobWidget::mouseDown (const juce::MouseEvent&) { dragStart = value; }
@@ -128,37 +153,39 @@ SelectorWidget::SelectorWidget (const juce::String& l, juce::StringArray c) : Kn
 
 juce::Rectangle<float> SelectorWidget::knobArea() const
 {
-    auto r = getLocalBounds().toFloat();
-    r.removeFromRight (r.getWidth() * 0.46f);
-    r.removeFromBottom (18.0f);
-    const float d = std::min (r.getWidth(), r.getHeight()) * 0.72f;
+    const auto r = getLocalBounds().toFloat();
+    const float d = diameter > 0.0f ? diameter : std::min (r.getWidth(), r.getHeight()) * 0.45f;
     return juce::Rectangle<float> (d, d).withCentre (r.getCentre());
 }
 
 void SelectorWidget::paint (juce::Graphics& g)
 {
-    auto r = getLocalBounds().toFloat();
-    auto list = r.removeFromRight (r.getWidth() * 0.46f);
     const auto k = knobArea();
+    const auto c = k.getCentre();
     const float R = k.getWidth() * 0.5f;
-    scaleDots (g, k.getCentre(), R * 1.2f, 16, false, colours::print, true);
+    knobScale (g, c, R * 1.13f, 16, false, true);
     const float angle = kStart + (kEnd - kStart) * (getIndex() + 0.5f) / 16.0f;
     const float sc = materials::scaleOf (g);
     materials::drawAt (g, knobImage ((int) std::ceil (k.getWidth() * sc), angle), k);
-    print (g, label, r.removeFromBottom (18.0f), 11.5f, juce::Justification::centred, false, true);
-    const float rowH = list.getHeight() / 16.0f;
+    // the 16 choices printed round the knob: the first eight stacked up its left side, the rest down its right,
+    // evenly spaced and tucked against an ellipse round the knob (as on the original's panel)
+    const float fh = 9.5f;
+    const auto font = panelFont (fh, true);
+    const float top = c.y - R * 1.27f, bottom = c.y + R * 1.08f, rx = R * 1.42f, ry = R * 1.34f;
     for (int i = 0; i < 16 && i < choices.size(); ++i)
     {
-        auto row = juce::Rectangle<float> (list.getX(), list.getY() + i * rowH, list.getWidth(), rowH);
+        const bool left = i < 8;
+        const int slot = left ? i : 15 - i; // 0 at the bottom, 7 at the top
+        const float y = bottom - (bottom - top) * slot / 7.0f;
+        const float q = juce::jlimit (-1.0f, 1.0f, (y - c.y) / ry);
+        const float dx = rx * std::sqrt (1.0f - q * q) + 2.0f;
+        const float w = juce::GlyphArrangement::getStringWidth (font, choices[i]) + 6.0f;
+        juce::Rectangle<float> box (w, fh + 2.0f);
+        box = left ? box.withPosition (c.x - dx - w, y - box.getHeight() * 0.5f) : box.withPosition (c.x + dx, y - box.getHeight() * 0.5f);
         if (i == getIndex())
-        {
-            g.setColour (colours::print);
-            g.fillRoundedRectangle (row.reduced (0, 0.4f), rowH * 0.45f);
-            printInk (g, choices[i], row.withTrimmedLeft (5.0f), std::min (11.0f, rowH * 1.05f), colours::panelDark, juce::Justification::centredLeft);
-        }
+            printTag (g, choices[i], box, fh);
         else
-            printInk (g, choices[i], row.withTrimmedLeft (5.0f), std::min (11.0f, rowH * 1.05f), colours::print.withAlpha (0.86f),
-                      juce::Justification::centredLeft, false);
+            printInk (g, choices[i], box, fh, colours::print.withAlpha (0.9f));
     }
 }
 
@@ -175,175 +202,209 @@ void KeyWidget::setLed (Led l)
     }
 }
 
-juce::Rectangle<float> KeyWidget::capArea() const
+float KeyWidget::extrusion() const
 {
-    auto r = getLocalBounds().toFloat();
-    const bool step = style == Style::Step || style == Style::StepSharp;
-    if (step)
-        r.removeFromBottom (30.0f); // the SHIFT function under it
-    else if (shiftLabel.isNotEmpty())
-        r.removeFromTop (17.0f);
-    float w = 0, h = 0;
     switch (style)
     {
-        case Style::Pill: w = std::min (r.getWidth() - 4.0f, 98.0f); h = std::min (r.getHeight() - 4.0f, 25.0f); break;
-        case Style::Square: w = std::min (r.getWidth() - 6.0f, 54.0f); h = std::min (r.getHeight() - 6.0f, 60.0f); break;
-        case Style::Step: case Style::StepSharp: w = std::min (r.getWidth() - 6.0f, 60.0f); h = std::min (r.getHeight() - 4.0f, 58.0f); break;
-        case Style::Transport: w = std::min (r.getWidth() - 6.0f, 66.0f); h = std::min (r.getHeight() - 6.0f, 50.0f); break;
-        case Style::Round: w = h = std::min ({ r.getWidth(), r.getHeight(), 50.0f }) - 4.0f; break;
+        case Style::Pill: case Style::DarkPill: return 4.0f;
+        case Style::Round: return 5.0f;
+        case Style::Transport: return 6.0f;
+        case Style::Square: case Style::Step: case Style::StepSharp: return 6.0f;
     }
-    return juce::Rectangle<float> (w, h).withCentre (r.getCentre());
+    return 5.0f;
 }
 
-float KeyWidget::capCorner() const
+juce::Rectangle<int> KeyWidget::boundsFor (juce::Rectangle<float> face) const
 {
-    const auto c = capArea();
+    auto b = face.expanded (kMargin);
+    b.setBottom (b.getBottom() + extrusion() + (labelBelow() ? kBottomLabel : 0.0f));
+    if (! labelBelow() && shiftLabel.isNotEmpty())
+        b.setTop (b.getY() - kTopLabel);
+    return b.getSmallestIntegerContainer();
+}
+
+juce::Rectangle<float> KeyWidget::faceArea() const
+{
+    auto r = getLocalBounds().toFloat().reduced (kMargin);
+    if (labelBelow())
+        r.removeFromBottom (kBottomLabel);
+    else if (shiftLabel.isNotEmpty())
+        r.removeFromTop (kTopLabel);
+    r.removeFromBottom (extrusion());
     if (style == Style::Round)
-        return c.getWidth() * 0.5f;
-    if (style == Style::Pill)
-        return std::min (6.0f, c.getHeight() * 0.3f);
-    return 7.0f;
+        r = r.withSizeKeepingCentre (std::min (r.getWidth(), r.getHeight()), std::min (r.getWidth(), r.getHeight()));
+    return r;
+}
+
+float KeyWidget::faceCorner() const
+{
+    const auto f = faceArea();
+    if (style == Style::Round)
+        return f.getWidth() * 0.5f;
+    if (style == Style::Pill || style == Style::DarkPill)
+        return std::min (5.0f, f.getHeight() * 0.3f);
+    return 5.0f;
 }
 
 namespace
 {
-    juce::Path triangle (juce::Rectangle<float> r, bool pointsRight)
+    juce::Path triangle (juce::Rectangle<float> r, int pointing) // 0 left, 1 right, 2 up, 3 down
     {
         juce::Path p;
-        if (pointsRight)
-            p.addTriangle (r.getX(), r.getY(), r.getRight(), r.getCentreY(), r.getX(), r.getBottom());
-        else
-            p.addTriangle (r.getRight(), r.getY(), r.getX(), r.getCentreY(), r.getRight(), r.getBottom());
+        switch (pointing)
+        {
+            case 0: p.addTriangle (r.getRight(), r.getY(), r.getX(), r.getCentreY(), r.getRight(), r.getBottom()); break;
+            case 1: p.addTriangle (r.getX(), r.getY(), r.getRight(), r.getCentreY(), r.getX(), r.getBottom()); break;
+            case 2: p.addTriangle (r.getX(), r.getBottom(), r.getCentreX(), r.getY(), r.getRight(), r.getBottom()); break;
+            default: p.addTriangle (r.getX(), r.getY(), r.getCentreX(), r.getBottom(), r.getRight(), r.getY()); break;
+        }
         return p;
     }
 
     /** The transport symbols: |<  (o)  []  >/|| */
-    juce::Path transportIcon (Key k, juce::Rectangle<float> cap)
+    juce::Path transportIcon (Key k, juce::Rectangle<float> r)
     {
         juce::Path p;
-        const auto c = cap.getCentre();
-        const float s = std::min (cap.getWidth(), cap.getHeight()) * 0.38f;
+        const auto c = r.getCentre();
+        const float s = std::min (r.getWidth(), r.getHeight()) * 0.52f;
         if (k == Key::ResetErase)
         {
-            p.addRectangle (c.x - s * 0.62f, c.y - s * 0.5f, s * 0.16f, s);
-            p.addPath (triangle ({ c.x - s * 0.40f, c.y - s * 0.5f, s * 0.95f, s }, false));
+            p.addRectangle (c.x - s * 0.55f, c.y - s * 0.5f, s * 0.17f, s);
+            p.addPath (triangle ({ c.x - s * 0.33f, c.y - s * 0.5f, s * 0.9f, s }, 0));
         }
         else if (k == Key::Rec)
-            p.addEllipse (juce::Rectangle<float> (s * 0.95f, s * 0.95f).withCentre (c));
+            p.addEllipse (juce::Rectangle<float> (s * 0.92f, s * 0.92f).withCentre (c));
         else if (k == Key::StopCancel)
             p.addRectangle (juce::Rectangle<float> (s * 0.85f, s * 0.85f).withCentre (c));
         else if (k == Key::PlayPause)
         {
-            {
-                const float x0 = c.x - s * 1.05f;
-                p.addPath (triangle ({ x0, c.y - s * 0.5f, s * 0.8f, s }, true));
-                juce::Path slash;
-                slash.startNewSubPath (x0 + s * 1.12f, c.y + s * 0.55f);
-                slash.lineTo (x0 + s * 1.42f, c.y - s * 0.55f);
-                juce::PathStrokeType (s * 0.12f).createStrokedPath (slash, slash);
-                p.addPath (slash);
-                p.addRectangle (x0 + s * 1.6f, c.y - s * 0.5f, s * 0.18f, s);
-                p.addRectangle (x0 + s * 1.92f, c.y - s * 0.5f, s * 0.18f, s);
-            }
+            const float x0 = c.x - s * 1.1f;
+            p.addPath (triangle ({ x0, c.y - s * 0.5f, s * 0.85f, s }, 1));
+            juce::Path slash;
+            slash.startNewSubPath (x0 + s * 1.12f, c.y + s * 0.55f);
+            slash.lineTo (x0 + s * 1.45f, c.y - s * 0.55f);
+            juce::PathStrokeType (s * 0.13f).createStrokedPath (slash, slash);
+            p.addPath (slash);
+            p.addRectangle (x0 + s * 1.62f, c.y - s * 0.5f, s * 0.2f, s);
+            p.addRectangle (x0 + s * 1.95f, c.y - s * 0.5f, s * 0.2f, s);
         }
         return p;
     }
 
-    const juce::Image& keyCapImage (int w, int h, float cornerPx, KeyWidget::Style style, float sc)
+    const juce::Image& faceImage (int w, int h, float cornerPx, juce::Colour albedo, float sc)
     {
-        const bool dark = style == KeyWidget::Style::Transport;
-        return materials::cached ("vbcap:" + juce::String (w) + "x" + juce::String (h) + ":" + juce::String ((int) style), [=] {
-            materials::Shading s = dark ? materials::Shading { 0.40f, 0.62f, 0.20f, 12.0f, 0.04f, 0.16f, 0.9f }
-                                        : materials::Shading { 0.50f, 0.52f, 0.13f, 10.0f, 0.03f, 0.20f, 0.8f };
-            return materials::pillow (w, h, cornerPx, std::min (w, h) * (style == KeyWidget::Style::Round ? 0.32f : 0.22f), 1.1f * sc,
-                                      dark ? colours::transportKey : colours::cream, s, dark ? 5u : 3u);
-        });
+        return materials::cached ("vbface:" + juce::String (w) + "x" + juce::String (h) + ":" + juce::String ((int) cornerPx) + ":"
+                                      + juce::String ((int) albedo.getARGB()),
+                                  [=] { return materials::keyFace (w, h, cornerPx, 1.6f * sc, albedo, 3); });
     }
 } // namespace
 
 void KeyWidget::paint (juce::Graphics& g)
 {
-    const bool step = style == Style::Step || style == Style::StepSharp;
-    const auto rest = capArea();
+    const auto rest = faceArea();
+    const float depth = extrusion(), corner = faceCorner();
     const bool pressed = down || latched;
-    const auto cap = rest.translated (0.0f, pressed ? 1.2f : 0.0f);
-    const float corner = capCorner();
+    const float sink = pressed ? depth * 0.7f : 0.0f;
+    const auto face = rest.translated (0.0f, sink);
+    const bool on = hasLed && (led == Led::On || (led == Led::Blink && blinkOn));
+    const bool dark = style == Style::DarkPill;
     const auto outsideInk = onCream ? colours::creamInk : colours::print;
 
-    // the SHIFT function: above the key in a small tag, or under a step key
+    // the SHIFT function: above the key, or under a step key
     if (shiftLabel.isNotEmpty())
     {
-        if (step)
-            printInk (g, shiftLabel, getLocalBounds().toFloat().removeFromBottom (30.0f).withTrimmedTop (2.0f), 10.0f, outsideInk.withAlpha (0.92f),
-                      juce::Justification::centredTop, true, 2);
+        if (labelBelow())
+            printInk (g, shiftLabel, juce::Rectangle<float> (rest.getX() - 6.0f, rest.getBottom() + depth + 3.0f, rest.getWidth() + 12.0f, kBottomLabel - 3.0f),
+                      9.5f, outsideInk.withAlpha (0.92f), juce::Justification::centredTop, true, 2);
         else
-            printInk (g, shiftLabel, juce::Rectangle<float> (rest.getX() - 8.0f, rest.getY() - 17.0f, rest.getWidth() + 16.0f, 14.0f), 9.5f,
-                      outsideInk.withAlpha (0.9f), juce::Justification::centredBottom, true);
+            printInk (g, shiftLabel, juce::Rectangle<float> (rest.getX() - 10.0f, rest.getY() - kTopLabel, rest.getWidth() + 20.0f, kTopLabel - 2.0f), 9.5f,
+                      outsideInk.withAlpha (0.92f), juce::Justification::centredBottom, true);
     }
 
-    const float sc = materials::scaleOf (g);
-    const int w = (int) std::ceil (cap.getWidth() * sc), h = (int) std::ceil (cap.getHeight() * sc);
-    materials::drawAt (g, keyCapImage (w, h, corner * sc, style, sc), cap);
-    if (pressed)
+    // a lit key throws a little of its light on the panel round its base
+    if (on)
     {
-        g.setColour (juce::Colours::black.withAlpha (0.07f));
-        g.fillRoundedRectangle (cap, corner);
+        const auto c = style == Style::Transport && key == Key::PlayPause ? colours::ledGreen : colours::lit;
+        juce::ColourGradient bloom (c.withAlpha (0.32f), rest.getCentreX(), rest.getBottom(), c.withAlpha (0.0f), rest.getCentreX(),
+                                    rest.getBottom() + kMargin + depth, true);
+        g.setGradientFill (bloom);
+        g.fillRoundedRectangle (rest.expanded (kMargin * 0.8f).withBottom (rest.getBottom() + depth + kMargin * 0.8f), corner + 4.0f);
     }
-    const bool on = hasLed && (led == Led::On || (led == Led::Blink && blinkOn));
-    paintLabel (g, cap, on);
+
+    // the walls: the face swept down to where the key meets the panel
+    const auto walls = juce::Rectangle<float> (rest.getX(), face.getY(), rest.getWidth(), rest.getBottom() + depth - face.getY());
+    juce::Colour sideTop = dark ? juce::Colour (0xff45474c) : colours::keySideTop;
+    juce::Colour sideBottom = dark ? juce::Colour (0xff1a1b1e) : colours::keySideBottom;
+    if (on)
+    {
+        sideTop = sideTop.interpolatedWith (colours::lit, 0.35f);
+        sideBottom = sideBottom.interpolatedWith (colours::lit, 0.25f);
+    }
+    g.setGradientFill (juce::ColourGradient (sideTop, 0.0f, face.getBottom() - corner, sideBottom, 0.0f, walls.getBottom(), false));
+    g.fillRoundedRectangle (walls, corner);
+    g.setColour (juce::Colours::black.withAlpha (0.25f));
+    g.drawRoundedRectangle (walls.reduced (0.25f), corner, 0.6f);
+
+    // the top face
+    const float sc = materials::scaleOf (g);
+    const int w = (int) std::ceil (face.getWidth() * sc), h = (int) std::ceil (face.getHeight() * sc);
+    materials::drawAt (g, faceImage (w, h, corner * sc, dark ? colours::darkFace : colours::keyFace, sc), face);
+    paintLabel (g, face, on);
     if (on && style != Style::Transport)
     {
-        // a red LED under translucent rubber: hot in the middle, a pink wash to the edges
-        juce::ColourGradient glow (colours::lit.withAlpha (0.50f), cap.getCentreX(), cap.getCentreY(), colours::lit.withAlpha (0.16f),
-                                   cap.getRight(), cap.getBottom(), true);
+        // a red LED under translucent rubber: hottest low in the key, a pink wash over the rest
+        juce::ColourGradient glow (colours::lit.withAlpha (0.52f), face.getCentreX(), face.getY() + face.getHeight() * 0.72f, colours::lit.withAlpha (0.14f),
+                                   face.getRight(), face.getY(), true);
         g.setGradientFill (glow);
-        g.fillRoundedRectangle (cap, corner);
+        g.fillRoundedRectangle (face, corner);
     }
     if (latched)
     {
         g.setColour (colours::ledOrange.withAlpha (0.95f));
-        g.drawRoundedRectangle (cap.expanded (2.6f), corner + 2.6f, 1.8f);
+        g.drawRoundedRectangle (face.expanded (2.5f), corner + 2.5f, 1.6f);
     }
 }
 
-void KeyWidget::paintLabel (juce::Graphics& g, juce::Rectangle<float> cap, bool on)
+void KeyWidget::paintLabel (juce::Graphics& g, juce::Rectangle<float> face, bool on)
 {
+    const auto ink = colours::keyInk;
     if (style == Style::Transport)
     {
-        const auto icon = transportIcon (key, cap);
-        const auto col = on ? (key == Key::PlayPause ? colours::ledGreen : colours::lit) : colours::cream.withAlpha (0.92f);
+        // a black panel set into the grey key, with the symbol on it
+        auto inset = face.reduced (std::min (face.getWidth(), face.getHeight()) * 0.1f);
+        g.setColour (juce::Colour (0xff141518));
+        g.fillRoundedRectangle (inset, 3.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.drawRoundedRectangle (inset.reduced (0.5f), 3.0f, 1.0f);
+        const auto icon = transportIcon (key, inset);
+        juce::Colour col = key == Key::Rec ? juce::Colour (0xffff7a80) : key == Key::PlayPause ? juce::Colour (0xff7fd18a) : juce::Colour (0xffc9cbcf);
         if (on)
         {
-            juce::ColourGradient bloom (col.withAlpha (0.45f), cap.getCentreX(), cap.getCentreY(), col.withAlpha (0.0f), cap.getCentreX() + cap.getWidth() * 0.5f,
-                                        cap.getCentreY(), true);
+            col = key == Key::PlayPause ? colours::ledGreen : colours::lit.brighter (0.3f);
+            juce::ColourGradient bloom (col.withAlpha (0.45f), inset.getCentreX(), inset.getCentreY(), col.withAlpha (0.0f), inset.getRight(), inset.getCentreY(), true);
             g.setGradientFill (bloom);
-            g.fillRoundedRectangle (cap, 7.0f);
-        }
-        else if (key == Key::Rec)
-        {
-            g.setColour (juce::Colour (0xffd8352b)); // the REC symbol is printed red
-            g.fillPath (icon);
-            return;
+            g.fillRoundedRectangle (inset, 3.0f);
         }
         g.setColour (col);
         g.fillPath (icon);
         return;
     }
-    const auto ink = colours::keyInk;
-    if (label == "<" || label == ">")
+    if (label == "<" || label == ">" || label == "^" || label == "v")
     {
+        const int dir = label == "<" ? 0 : label == ">" ? 1 : label == "^" ? 2 : 3;
+        const float s = face.getHeight() * 0.42f;
         g.setColour (ink);
-        g.fillPath (triangle (juce::Rectangle<float> (cap.getHeight() * 0.36f, cap.getHeight() * 0.42f).withCentre (cap.getCentre()), label == ">"));
+        g.fillPath (triangle (juce::Rectangle<float> (dir < 2 ? s * 0.85f : s * 1.1f, dir < 2 ? s : s * 0.85f).withCentre (face.getCentre()), dir));
         return;
     }
     if (style == Style::StepSharp)
     {
         // a black plate behind the number, like a keyboard's black key
-        auto plate = cap.reduced (cap.getWidth() * 0.2f, cap.getHeight() * 0.2f);
+        auto plate = face.reduced (face.getWidth() * 0.16f, face.getHeight() * 0.2f);
         g.setColour (juce::Colour (0xff17181b));
-        g.fillRoundedRectangle (plate, 3.0f);
-        g.setColour (colours::cream);
-        g.setFont (keyFont (cap.getHeight() * 0.44f));
+        g.fillRoundedRectangle (plate, 2.5f);
+        g.setColour (colours::keyFace);
+        g.setFont (keyFont (face.getHeight() * 0.46f));
         g.drawText (label, plate, juce::Justification::centred, false);
         return;
     }
@@ -351,13 +412,13 @@ void KeyWidget::paintLabel (juce::Graphics& g, juce::Rectangle<float> cap, bool 
     if (big)
     {
         g.setColour (ink);
-        g.setFont (keyFont (cap.getHeight() * 0.46f));
-        g.drawText (label, cap.translated (-1.0f, 0.0f), juce::Justification::centred, false);
+        g.setFont (keyFont (std::min (face.getHeight() * 0.42f, face.getWidth() * 0.62f)));
+        g.drawText (label, face.translated (-1.0f, 0.0f), juce::Justification::centred, false);
         return;
     }
-    const float h = style == Style::Pill ? std::min (11.0f, cap.getHeight() * 0.5f) : 11.5f;
-    printInk (g, label, cap.reduced (4.0f, 2.0f), h, ink, juce::Justification::centred, true, style == Style::Pill ? 1 : 2);
-    juce::ignoreUnused (on);
+    const auto textInk = style == Style::DarkPill ? (on ? colours::lit.brighter (0.4f) : juce::Colour (0xffd0d2d6)) : ink;
+    const float h = style == Style::Pill || style == Style::DarkPill ? std::min (10.0f, face.getHeight() * 0.5f) : 10.0f;
+    printInk (g, label, face.reduced (3.0f, 1.0f), h, textInk, juce::Justification::centred, true, style == Style::Square ? 2 : 1);
 }
 
 void KeyWidget::mouseDown (const juce::MouseEvent&)
@@ -388,11 +449,16 @@ void KeyWidget::mouseUp (const juce::MouseEvent&)
 
 // ---------------------------------------------------------------- lamp
 
+juce::Rectangle<int> LampWidget::boundsFor (float x, float y, float labelWidth)
+{
+    return juce::Rectangle<float> (x - 5.5f, y - 7.0f, 11.0f + (labelWidth > 0 ? labelWidth + 4.0f : 0.0f), 14.0f).getSmallestIntegerContainer();
+}
+
 void LampWidget::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
     const float d = 7.0f;
-    const auto ink = (onCream ? colours::creamInk : colours::print).withAlpha (0.9f);
+    const auto ink = (onCream ? colours::creamInk : colours::print).withAlpha (0.92f);
     juce::Rectangle<float> lr;
     if (above)
     {
@@ -401,15 +467,16 @@ void LampWidget::paint (juce::Graphics& g)
     }
     else
     {
-        lr = juce::Rectangle<float> (d, d).withCentre ({ r.getX() + d * 0.5f + 2.0f, r.getCentreY() });
-        printInk (g, label, r.withTrimmedLeft (d + 6.0f), 9.5f, ink, juce::Justification::centredLeft);
+        lr = juce::Rectangle<float> (d, d).withCentre ({ r.getX() + 5.5f, r.getCentreY() });
+        if (label.isNotEmpty())
+            printInk (g, label, r.withTrimmedLeft (13.0f), 9.5f, ink, juce::Justification::centredLeft);
     }
     const bool on = state == Led::On || (state == Led::Blink && blinkOn);
     if (on)
     {
-        juce::ColourGradient glow (colour.withAlpha (0.6f), lr.getCentreX(), lr.getCentreY(), colour.withAlpha (0.0f), lr.getCentreX() + 10.0f, lr.getCentreY(), true);
+        juce::ColourGradient glow (colour.withAlpha (0.6f), lr.getCentreX(), lr.getCentreY(), colour.withAlpha (0.0f), lr.getCentreX() + 7.0f, lr.getCentreY(), true);
         g.setGradientFill (glow);
-        g.fillEllipse (lr.expanded (10.0f));
+        g.fillEllipse (lr.expanded (7.0f));
     }
     const float sc = materials::scaleOf (g);
     const int lp = (int) std::ceil (d * sc);
@@ -532,14 +599,26 @@ namespace
     }
 } // namespace
 
+juce::Rectangle<float> LcdWidget::statusArea() const
+{
+    auto in = getLocalBounds().toFloat().reduced (6.0f).reduced (9.0f, 7.0f);
+    return in.removeFromBottom (in.getHeight() * 0.2f).withTrimmedLeft (40.0f);
+}
+
+float LcdWidget::segmentCentre (int part) const
+{
+    const auto st = statusArea();
+    return st.getX() + (part + 0.5f) * st.getWidth() / 16.0f;
+}
+
 void LcdWidget::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
     // the bezel
     g.setColour (juce::Colour (0xff121316));
-    g.fillRoundedRectangle (r, 7.0f);
+    g.fillRoundedRectangle (r, 6.0f);
     g.setColour (juce::Colours::white.withAlpha (0.10f));
-    g.drawRoundedRectangle (r.reduced (0.5f), 7.0f, 1.0f);
+    g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
     auto glass = r.reduced (6.0f);
     // the amber backlight, brightest in the middle
     juce::ColourGradient back (colours::lcdBack.brighter (0.22f), glass.getCentreX(), glass.getCentreY(), colours::lcdBack.darker (0.18f), glass.getX(),
@@ -549,10 +628,12 @@ void LcdWidget::paint (juce::Graphics& g)
     g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.22f), 0, glass.getY(), juce::Colours::transparentBlack, 0, glass.getY() + 7.0f, false));
     g.fillRoundedRectangle (glass, 3.0f);
 
-    auto in = glass.reduced (10.0f, 8.0f);
+    auto in = glass.reduced (9.0f, 7.0f);
+    auto status = in.removeFromBottom (in.getHeight() * 0.2f);
+    in.removeFromBottom (3.0f);
     const auto ink = colours::lcdInk;
     const auto ghost = colours::lcdInk.withAlpha (0.075f);
-    const float pitch = std::min (in.getWidth() * 0.6f / 48.0f, in.getHeight() * 0.46f / 16.0f);
+    const float pitch = std::min (in.getWidth() * 0.68f / 48.0f, in.getHeight() / 16.5f);
 
     // the two lines: parameter, value
     const bool hide = shown.blink && ! blinkOn;
@@ -560,54 +641,41 @@ void LcdWidget::paint (juce::Graphics& g)
     dotLine (g, shown.value, in.getX(), in.getY() + 8.5f * pitch, pitch, ink, ghost, true, false, -1, false);
 
     // the indicators and the input meter, beside them
-    auto side = juce::Rectangle<float> (in.getX() + 48.0f * pitch + 8.0f, in.getY(), in.getRight() - (in.getX() + 48.0f * pitch + 8.0f), 16.5f * pitch);
-    const float rowH = side.getHeight() / 4.0f;
-    auto indicator = [&] (const juce::String& t, bool on, juce::Rectangle<float> cell) {
+    const float x0 = in.getX() + 48.0f * pitch + 6.0f;
+    auto side = juce::Rectangle<float> (x0, in.getY(), in.getRight() - x0, 16.5f * pitch);
+    const float rowH = side.getHeight() / 6.0f;
+    auto indicator = [&] (const juce::String& t, bool on) {
+        auto cell = side.removeFromTop (rowH);
         const auto c = on ? ink : ghost.withMultipliedAlpha (2.0f);
         g.setColour (c);
-        g.fillPath (triangle (juce::Rectangle<float> (5.0f, 6.0f).withCentre ({ cell.getX() + 3.0f, cell.getCentreY() }), true));
-        printInk (g, t, cell.withTrimmedLeft (9.0f), 10.5f, c, juce::Justification::centredLeft);
+        g.fillPath (triangle (juce::Rectangle<float> (4.0f, 5.0f).withCentre ({ cell.getX() + 2.5f, cell.getCentreY() }), 1));
+        printInk (g, t, cell.withTrimmedLeft (7.0f), std::min (9.0f, rowH * 1.1f), c, juce::Justification::centredLeft);
     };
-    auto row0 = side.removeFromTop (rowH), row1 = side.removeFromTop (rowH), row2 = side.removeFromTop (rowH);
-    indicator ("PATTERN", shown.patternInd, row0.removeFromLeft (row0.getWidth() * 0.58f));
-    indicator ("SONG", shown.songInd, row0);
-    indicator ("WAVE", shown.waveInd, row1.removeFromLeft (row1.getWidth() * 0.58f));
-    indicator ("KNOB", shown.knobInd, row1);
-    indicator ("ORIGINAL", shown.originalInd, row2);
-    auto meter = side.reduced (0.0f, rowH * 0.22f);
-    auto clip = meter.removeFromRight (30.0f);
-    for (int i = 0; i < 12; ++i)
+    indicator ("PATTERN", shown.patternInd);
+    indicator ("SONG", shown.songInd);
+    indicator ("WAVE", shown.waveInd);
+    indicator ("KNOB", shown.knobInd);
+    indicator ("ORIGINAL", shown.originalInd);
+    auto meter = side.reduced (0.0f, rowH * 0.18f);
+    auto clip = meter.removeFromRight (22.0f);
+    for (int i = 0; i < 10; ++i)
     {
-        auto seg = juce::Rectangle<float> (meter.getX() + i * meter.getWidth() / 12.0f, meter.getY(), meter.getWidth() / 12.0f - 2.0f, meter.getHeight());
-        g.setColour (shown.inputLevel * 12.0f > i ? ink : ghost.withMultipliedAlpha (1.5f));
+        auto seg = juce::Rectangle<float> (meter.getX() + i * meter.getWidth() / 10.0f, meter.getY(), meter.getWidth() / 10.0f - 1.5f, meter.getHeight());
+        g.setColour (shown.inputLevel * 10.0f > i ? ink : ghost.withMultipliedAlpha (1.5f));
         g.fillRect (seg);
     }
-    printInk (g, "CLIP", clip, 10.5f, shown.clip ? ink : ghost.withMultipliedAlpha (2.0f), juce::Justification::centredRight);
+    printInk (g, "CLIP", clip, 8.5f, shown.clip ? ink : ghost.withMultipliedAlpha (2.0f), juce::Justification::centredRight);
 
-    // part status: PLAY, SWING, ACCENT, OUT L/R (the one shown marked), and the part numbers under them
-    auto st = in.withTrimmedTop (17.5f * pitch + 4.0f);
-    auto numbers = st.removeFromBottom (12.0f);
-    auto labels = st.removeFromLeft (50.0f);
+    // the part status row: what it shows (PLAY, SWING, ACCENT, OUT L/R), and a segment for each part
     static const char* rows[4] = { "PLAY", "SWING", "ACCENT", "OUT L/R" };
-    const float sh = st.getHeight() / 4.0f, cw = st.getWidth() / 16.0f;
-    for (int rr = 0; rr < 4; ++rr)
-    {
-        const bool active = rr == shown.statusRow;
-        printInk (g, rows[rr], { labels.getX(), st.getY() + rr * sh, labels.getWidth(), sh }, 10.0f, active ? ink : ink.withAlpha (0.32f),
-                  juce::Justification::centredLeft);
-        for (int p = 0; p < 16; ++p)
-        {
-            auto c = juce::Rectangle<float> (st.getX() + p * cw, st.getY() + rr * sh, cw, sh).reduced (cw * 0.22f, sh * 0.24f);
-            g.setColour (active && shown.status[(size_t) p] ? ink : ghost);
-            g.fillRect (c);
-        }
-    }
-    static const char* parts[16] = { "1", "2", "3", "4", "5", "6A", "6B", "7A", "7B", "A", "1", "2", "3", "4", "5", "A" };
+    printInk (g, rows[std::clamp (shown.statusRow, 0, 3)], status.removeFromLeft (40.0f), 9.0f, ink, juce::Justification::centredLeft);
+    const float cw = status.getWidth() / 16.0f;
     for (int p = 0; p < 16; ++p)
-        printInk (g, parts[p], { st.getX() + p * cw, numbers.getY(), cw, numbers.getHeight() }, 9.0f, ink.withAlpha (0.55f), juce::Justification::centred);
-    g.setColour (ink.withAlpha (0.45f));
-    g.drawHorizontalLine ((int) numbers.getY(), st.getX() + 2.0f, st.getX() + cw * 10.0f - 3.0f);
-    g.drawHorizontalLine ((int) numbers.getY(), st.getX() + cw * 10.0f + 3.0f, st.getRight() - 2.0f);
+    {
+        auto c = juce::Rectangle<float> (status.getX() + p * cw, status.getY(), cw, status.getHeight()).reduced (cw * 0.16f, status.getHeight() * 0.2f);
+        g.setColour (shown.status[(size_t) p] ? ink : ghost);
+        g.fillRect (c);
+    }
 
     // a faint reflection on the glass
     g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.12f), glass.getX(), glass.getY(), juce::Colours::transparentWhite,
@@ -617,12 +685,10 @@ void LcdWidget::paint (juce::Graphics& g)
 
 // ---------------------------------------------------------------- ribbon and slider
 
-juce::Rectangle<float> RibbonWidget::padArea() const { return getLocalBounds().toFloat().withTrimmedBottom (18.0f).reduced (3.0f); }
-
 void RibbonWidget::touch (const juce::MouseEvent& e, bool on)
 {
-    const auto pad = padArea();
-    pos = std::clamp ((e.position.x - pad.getX()) / std::max (1.0f, pad.getWidth()), 0.0f, 1.0f);
+    const auto pad = getLocalBounds().toFloat().reduced (4.0f);
+    pos = std::clamp (1.0f - (e.position.y - pad.getY()) / std::max (1.0f, pad.getHeight()), 0.0f, 1.0f);
     touching = on;
     repaint();
     if (onTouch)
@@ -631,52 +697,62 @@ void RibbonWidget::touch (const juce::MouseEvent& e, bool on)
 
 void RibbonWidget::paint (juce::Graphics& g)
 {
-    const auto pad = padArea();
-    print (g, "RIBBON", getLocalBounds().toFloat().removeFromBottom (16.0f), 11.0f, juce::Justification::centred, false, true);
-    // a pale, matt touch strip, set slightly into the panel
-    juce::ColourGradient body (colours::cream.darker (0.04f), 0, pad.getY(), colours::cream.darker (0.12f), 0, pad.getBottom(), false);
-    g.setGradientFill (body);
-    g.fillRoundedRectangle (pad, 5.0f);
-    g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.20f), 0, pad.getY(), juce::Colours::transparentBlack, 0, pad.getY() + 8.0f, false));
-    g.fillRoundedRectangle (pad, 5.0f);
-    g.setColour (colours::creamInk.withAlpha (0.12f));
-    for (int i = 1; i < 8; ++i)
-        g.drawVerticalLine ((int) (pad.getX() + pad.getWidth() * i / 8.0f), pad.getBottom() - 10.0f, pad.getBottom() - 4.0f);
+    auto frame = getLocalBounds().toFloat().reduced (1.0f);
+    // a grey bezel round a pale, matt touch strip
+    g.setGradientFill (juce::ColourGradient (colours::keySideTop, 0, frame.getY(), colours::keySideBottom, 0, frame.getBottom(), false));
+    g.fillRoundedRectangle (frame, 4.0f);
+    const auto pad = frame.reduced (4.0f);
+    g.setGradientFill (juce::ColourGradient (colours::creamPanel.brighter (0.05f), pad.getX(), pad.getY(), colours::creamPanel.darker (0.08f), pad.getRight(),
+                                             pad.getBottom(), false));
+    g.fillRoundedRectangle (pad, 2.5f);
+    g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.22f), pad.getX(), 0, juce::Colours::transparentBlack, pad.getX() + 7.0f, 0, false));
+    g.fillRoundedRectangle (pad, 2.5f);
+    g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.18f), 0, pad.getY(), juce::Colours::transparentBlack, 0, pad.getY() + 7.0f, false));
+    g.fillRoundedRectangle (pad, 2.5f);
     if (touching)
     {
-        const float x = pad.getX() + pos * pad.getWidth();
-        juce::ColourGradient glow (colours::ledOrange.withAlpha (0.75f), x, pad.getCentreY(), colours::ledOrange.withAlpha (0.0f), x + 34.0f, pad.getCentreY(), true);
+        const float y = pad.getBottom() - pos * pad.getHeight();
+        juce::ColourGradient glow (colours::ledOrange.withAlpha (0.75f), pad.getCentreX(), y, colours::ledOrange.withAlpha (0.0f), pad.getCentreX(), y + 30.0f, true);
         g.setGradientFill (glow);
-        g.fillRoundedRectangle (pad, 5.0f);
+        g.fillRoundedRectangle (pad, 2.5f);
     }
 }
 
 juce::Rectangle<float> SliderWidget::slotArea() const
 {
-    auto r = getLocalBounds().toFloat().withTrimmedBottom (18.0f);
-    return r.withSizeKeepingCentre (6.0f, r.getHeight() - 22.0f);
+    auto r = getLocalBounds().toFloat();
+    return r.withSizeKeepingCentre (7.0f, r.getHeight() - 28.0f);
 }
 
 void SliderWidget::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
-    print (g, "SLIDER", r.removeFromBottom (16.0f), 11.0f, juce::Justification::centred, false, true);
     const auto slot = slotArea();
-    g.setColour (juce::Colours::black.withAlpha (0.75f));
-    g.fillRoundedRectangle (slot, 3.0f);
+    // the printed scale across the slot
+    g.setColour (colours::print.withAlpha (0.75f));
+    for (int i = 0; i <= 12; ++i)
+    {
+        const float y = slot.getY() + slot.getHeight() * i / 12.0f;
+        const float half = i % 6 == 0 ? r.getWidth() * 0.46f : r.getWidth() * 0.36f;
+        g.fillRect (slot.getCentreX() - half, y - 0.5f, half - 7.0f, 1.0f);
+        g.fillRect (slot.getCentreX() + 7.0f, y - 0.5f, half - 7.0f, 1.0f);
+    }
+    g.setColour (juce::Colours::black.withAlpha (0.85f));
+    g.fillRoundedRectangle (slot, 3.5f);
     g.setColour (colours::print.withAlpha (0.7f));
-    for (int i = 0; i <= 8; ++i)
-        g.fillRect (slot.getRight() + 5.0f, slot.getY() + slot.getHeight() * i / 8.0f - 0.5f, i % 4 == 0 ? 8.0f : 5.0f, 1.0f);
+    g.drawRoundedRectangle (slot.expanded (1.5f), 4.5f, 1.0f);
+    // the cap: a short extruded grey block
     const float y = slot.getBottom() - value * slot.getHeight();
-    auto cap = juce::Rectangle<float> (r.getWidth() * 0.78f, 20.0f).withCentre ({ slot.getCentreX(), y });
-    g.setColour (juce::Colours::black.withAlpha (0.3f));
-    g.fillRoundedRectangle (cap.translated (1.5f, 2.5f).expanded (1.0f), 4.0f);
+    auto cap = juce::Rectangle<float> (r.getWidth() * 0.62f, 24.0f).withCentre ({ slot.getCentreX(), y - 3.0f });
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
+    g.fillRoundedRectangle (cap.translated (2.0f, 5.0f).expanded (1.5f), 4.0f);
+    g.setGradientFill (juce::ColourGradient (colours::keySideTop, 0, cap.getBottom() - 3.0f, colours::keySideBottom, 0, cap.getBottom() + 6.0f, false));
+    g.fillRoundedRectangle (cap.withBottom (cap.getBottom() + 6.0f), 3.5f);
     const float sc = materials::scaleOf (g);
     const int w = (int) std::ceil (cap.getWidth() * sc), h = (int) std::ceil (cap.getHeight() * sc);
-    const auto& img = materials::cached ("vbfader2:" + juce::String (w) + "x" + juce::String (h), [=] {
-        return materials::pillow (w, h, 3.5f * sc, h * 0.3f, 0.6f * sc, colours::cream, materials::Shading { 0.50f, 0.52f, 0.13f, 10.0f, 0.03f, 0.2f, 0.8f }, 9);
-    });
-    materials::drawAt (g, img, cap);
+    materials::drawAt (g, materials::cached ("vbfader3:" + juce::String (w) + "x" + juce::String (h),
+                                             [=] { return materials::keyFace (w, h, 3.5f * sc, 1.6f * sc, colours::keyFace, 9); }),
+                       cap);
     g.setColour (colours::keyInk);
     g.fillRect (cap.withSizeKeepingCentre (cap.getWidth() - 10.0f, 2.0f));
 }
@@ -721,7 +797,7 @@ void ValveWindow::setGlow (float tubeGain, float level)
 
 void ValveWindow::paint (juce::Graphics& g)
 {
-    auto r = getLocalBounds().toFloat().reduced (3.0f).withTrimmedBottom (16.0f);
+    auto r = getLocalBounds().toFloat().reduced (3.0f);
     // the chrome ring and the dark window
     g.setColour (juce::Colours::black.withAlpha (0.45f));
     g.fillEllipse (r.translated (1.5f, 3.0f));
@@ -772,31 +848,11 @@ void ValveWindow::paint (juce::Graphics& g)
         g.setColour (juce::Colours::white.withAlpha (0.30f));
         g.fillRoundedRectangle (tube.withWidth (tube.getWidth() * 0.12f).translated (tube.getWidth() * 0.16f, tube.getHeight() * 0.12f).withTrimmedBottom (tube.getHeight() * 0.4f), 2.0f);
     }
-    // the perforated grille in front of them: metal webbing between round holes
-    {
-        juce::Graphics::ScopedSaveState save (g);
-        juce::Path clip;
-        clip.addEllipse (win);
-        g.reduceClipRegion (clip);
-        juce::Path web;
-        web.setUsingNonZeroWinding (false);
-        web.addRectangle (win);
-        const float pitch = 6.5f, hole = 2.75f;
-        int rowIndex = 0;
-        for (float y = win.getY(); y < win.getBottom() + pitch; y += pitch * 0.866f, ++rowIndex)
-            for (float x = win.getX() + ((rowIndex % 2) != 0 ? pitch * 0.5f : 0.0f); x < win.getRight() + pitch; x += pitch)
-                web.addEllipse (x - hole, y - hole, hole * 2.0f, hole * 2.0f);
-        g.setColour (juce::Colours::black.withAlpha (0.28f));
-        g.fillPath (web, juce::AffineTransform::translation (0.0f, 0.7f));
-        g.setColour (juce::Colour (0xffa4abb5).withAlpha (0.42f));
-        g.fillPath (web);
-    }
     // a reflection across the window, and the ring's inner edge
     g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.16f), win.getX(), win.getY(), juce::Colours::transparentWhite, win.getX(),
                                              win.getCentreY(), false));
     g.fillEllipse (win);
     g.setColour (juce::Colours::black.withAlpha (0.5f));
     g.drawEllipse (win, 1.2f);
-    print (g, "VALVE DRIVE", getLocalBounds().toFloat().removeFromBottom (15.0f), 10.5f, juce::Justification::centred, false, true);
 }
 } // namespace valvebox::ui
