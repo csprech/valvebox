@@ -11,11 +11,11 @@ mod ffi;
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyDownEvent, KeyUpEvent, Modifiers, ModifiersChangedEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, RenderImage, ScrollWheelEvent, Timer, Window, WindowBounds,
-    WindowOptions, div, img, prelude::*, px, rgb, size,
+    WindowOptions, div, img, prelude::*, px, rgb, rgba, size,
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Deserialize, Clone)]
 struct Part {
@@ -49,6 +49,13 @@ struct Device {
     focus: FocusHandle,
     frame: (f32, f32, f32), // the panel's scale and offset in the window
     pressed: bool,
+    retired: Vec<(u64, Arc<RenderImage>)>, // pictures replaced, to take out of the GPU's atlas (with the frame they went)
+    frames: u64,
+    dropped: usize,
+    pointer: Option<(f32, f32)>, // where the mouse is, in panel pixels (None: off the panel)
+    pointer_at: (f32, f32),      // and in the window
+    pointer_still: Instant,
+    tip: Option<(String, (f32, f32))>,
 }
 
 fn mods_of(m: &Modifiers) -> i32 {
@@ -73,6 +80,13 @@ impl Device {
             focus: cx.focus_handle(),
             frame: (1.0, 0.0, 0.0),
             pressed: false,
+            retired: Vec::new(),
+            frames: 0,
+            dropped: 0,
+            pointer: None,
+            pointer_at: (0.0, 0.0),
+            pointer_still: Instant::now(),
+            tip: None,
         };
         // the panel's lights, screens and meters move: look again 30 times a second
         cx.spawn(async move |this, cx| {
@@ -89,7 +103,35 @@ impl Device {
                 Timer::after(Duration::from_millis(1500)).await;
                 let mut lines = Vec::new();
                 if std::env::var("GPUI_SELFTEST_SOUND_ONLY").is_err() {
+                    let before = this.update(cx, |this, _| this.dropped).unwrap_or(0);
+                    if let Some((x, y)) = config::MENU_AT {
+                        // a field that opens a menu: it opens (the old forwarding missed the clicks it hands on)
+                        let _ = this.update(cx, |this, _| {
+                            this.panel.mouse(ffi::Mouse::Down, x, y, 0, 1);
+                            this.panel.mouse(ffi::Mouse::Up, x, y, 0, 1);
+                        });
+                        Timer::after(Duration::from_millis(400)).await;
+                        let _ = this.update(cx, |this, _| {
+                            let open = this.panel.menu_open();
+                            let what = this.panel.tooltip(x, y);
+                            lines.push(format!("{}  the field at ({x:.0}, {y:.0}) opens its menu ({what})", if open { "ok  " } else { "FAIL" }));
+                            this.panel.close_menus();
+                        });
+                        Timer::after(Duration::from_millis(200)).await;
+                    }
                     let _ = this.update(cx, |this, cx| this.self_test_parts(&mut lines, cx));
+                    // (three frames on: what the test replaced is off screen, and let go of)
+                    let start = this.update(cx, |this, _| this.frames).unwrap_or(0);
+                    for _ in 0..60 {
+                        Timer::after(Duration::from_millis(100)).await;
+                        if this.update(cx, |this, _| this.frames >= start + 3).unwrap_or(true) {
+                            break;
+                        }
+                    }
+                    let _ = this.update(cx, |this, _| {
+                        let d = this.dropped - before;
+                        lines.push(format!("{}  pictures redrawn are let go of ({d} dropped, {} waiting)", if d > 0 && this.retired.len() < 64 { "ok  " } else { "FAIL" }, this.retired.len()));
+                    });
                 }
                 let _ = this.update(cx, |this, _| this.panel.test_sound(true));
                 // (the loudest moment in a second and a half: a drum dies away)
@@ -129,7 +171,9 @@ impl Device {
         }
         let (w, h) = ((self.layout.width * scale).ceil() as usize, (self.layout.height * scale).ceil() as usize);
         let img = image(w, h, self.panel.render_background(scale, w, h));
-        self.background = Some((key, img.clone()));
+        if let Some((_, old)) = self.background.replace((key, img.clone())) {
+            self.retired.push((self.frames, old));
+        }
         img
     }
 
@@ -145,7 +189,10 @@ impl Device {
         let p = &self.layout.parts[i];
         let (w, h) = ((p.w * scale).ceil().max(1.0) as usize, (p.h * scale).ceil().max(1.0) as usize);
         let img = image(w, h, self.panel.render_part(i, scale, w, h));
-        self.sprites[i] = Some(Sprite { signature, scale: key, image: img.clone() });
+        // (GPUI keeps every picture it's shown in its atlas until told to let it go: the old one goes once it's off screen)
+        if let Some(old) = self.sprites[i].replace(Sprite { signature, scale: key, image: img.clone() }) {
+            self.retired.push((self.frames, old.image));
+        }
         img
     }
 
@@ -246,6 +293,20 @@ impl Render for Device {
         let (ox, oy) = ((vw - self.layout.width * s) * 0.5, (vh - self.layout.height * s) * 0.5);
         self.frame = (s, ox, oy);
         let dev = (s * window.scale_factor() * 16.0).round() / 16.0;
+        // pictures replaced two frames ago are off screen now: out of the atlas with them
+        self.frames += 1;
+        let now = self.frames;
+        let (old, keep): (Vec<_>, Vec<_>) = self.retired.drain(..).partition(|(f0, _)| now >= f0 + 2);
+        self.retired = keep;
+        for (_, img) in old {
+            if window.drop_image(img).is_ok() {
+                self.dropped += 1;
+            }
+        }
+        // the bridge keeps the panel where it is on screen (so its menus and pop-ups open over it)
+        let wb = window.bounds();
+        self.panel.window_origin(f32::from(wb.origin.x), f32::from(wb.origin.y) + (f32::from(wb.size.height) - vh).max(0.0));
+        self.panel.place(ox, oy, s);
         let place = move |x: f32, y: f32, w: f32, h: f32| div().absolute().left(px(ox + x * s)).top(px(oy + y * s)).w(px(w * s)).h(px(h * s));
 
         let bg = self.background(dev);
@@ -255,17 +316,38 @@ impl Render for Device {
             .track_focus(&self.focus)
             .on_mouse_down(MouseButton::Left, cx.listener(|this, ev: &MouseDownEvent, window, cx| {
                 this.focus.focus(window);
+                this.panel.window_origin_from_pointer(f32::from(ev.position.x), f32::from(ev.position.y));
+                this.tip = None;
+                this.pointer_still = Instant::now();
                 let (x, y) = this.to_panel(ev.position);
                 this.pressed = true;
                 this.panel.mouse(ffi::Mouse::Down, x, y, mods_of(&ev.modifiers), ev.click_count as i32);
                 cx.notify();
             }))
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| {
+                let (x, y) = this.to_panel(ev.position);
                 if this.pressed {
-                    let (x, y) = this.to_panel(ev.position);
                     this.panel.mouse(ffi::Mouse::Drag, x, y, mods_of(&ev.modifiers), 1);
                     cx.notify();
+                    return;
                 }
+                // hovering: the panel hears it (for its own hover), and a tooltip waits for the mouse to rest
+                let at = (f32::from(ev.position.x), f32::from(ev.position.y));
+                this.panel.window_origin_from_pointer(at.0, at.1);
+                let on = x >= 0.0 && y >= 0.0 && x < this.layout.width && y < this.layout.height;
+                if on {
+                    this.panel.mouse(ffi::Mouse::Move, x, y, mods_of(&ev.modifiers), 0);
+                } else if this.pointer.is_some() {
+                    this.panel.mouse(ffi::Mouse::Leave, 0.0, 0.0, 0, 0);
+                }
+                let p = if on { Some((x, y)) } else { None };
+                if p != this.pointer {
+                    this.pointer = p;
+                    this.pointer_at = at;
+                    this.pointer_still = Instant::now();
+                    this.tip = None;
+                }
+                cx.notify();
             }))
             .on_mouse_up(MouseButton::Left, cx.listener(|this, ev: &MouseUpEvent, _, cx| {
                 let (x, y) = this.to_panel(ev.position);
@@ -301,6 +383,37 @@ impl Render for Device {
             let p = self.layout.parts[i].clone();
             let sprite = self.sprite(i, dev);
             root = root.child(place(p.x, p.y, p.w, p.h).child(img(sprite).size_full().object_fit(ObjectFit::Fill)));
+        }
+        // a tooltip, once the mouse has rested on a part that says what it is
+        if let Some(pp) = self.pointer {
+            if !self.pressed && self.pointer_still.elapsed() > Duration::from_millis(550) {
+                if self.tip.as_ref().map(|t| t.1) != Some(pp) {
+                    self.tip = Some((self.panel.tooltip(pp.0, pp.1), pp));
+                }
+                if let Some((text, _)) = &self.tip {
+                    if !text.is_empty() {
+                        let w = (text.len() as f32 * 6.6 + 22.0).min(340.0);
+                        let x = (self.pointer_at.0 + 14.0).min(vw - w - 8.0).max(8.0);
+                        let y = if self.pointer_at.1 + 60.0 > vh { self.pointer_at.1 - 40.0 } else { self.pointer_at.1 + 20.0 };
+                        root = root.child(
+                            div()
+                                .absolute()
+                                .left(px(x))
+                                .top(px(y))
+                                .max_w(px(340.0))
+                                .px(px(9.0))
+                                .py(px(6.0))
+                                .bg(rgba(0x17181cf2))
+                                .border_1()
+                                .border_color(rgba(0xffffff26))
+                                .rounded(px(5.0))
+                                .text_size(px(12.0))
+                                .text_color(rgb(0xece8dd))
+                                .child(text.clone()),
+                        );
+                    }
+                }
+            }
         }
         root
     }

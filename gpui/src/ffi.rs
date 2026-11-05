@@ -20,6 +20,12 @@ unsafe extern "C" {
     fn jp_modifiers(p: *mut JpPanel, mods: c_int);
     fn jp_output_level(p: *mut JpPanel) -> c_float;
     fn jp_test_sound(p: *mut JpPanel, start: c_int);
+    fn jp_window_origin(p: *mut JpPanel, x: c_float, y: c_float);
+    fn jp_window_origin_from_pointer(p: *mut JpPanel, x: c_float, y: c_float);
+    fn jp_place(p: *mut JpPanel, x: c_float, y: c_float, scale: c_float);
+    fn jp_tooltip(p: *mut JpPanel, x: c_float, y: c_float) -> *const c_char;
+    fn jp_menu_open(p: *mut JpPanel) -> c_int;
+    fn jp_close_menus(p: *mut JpPanel);
 }
 
 pub struct Panel(*mut JpPanel);
@@ -28,6 +34,8 @@ pub enum Mouse {
     Down,
     Drag,
     Up,
+    Move,  // (no button: hovering)
+    Leave, // (off the panel)
 }
 
 impl Panel {
@@ -55,6 +63,8 @@ impl Panel {
             Mouse::Down => 0,
             Mouse::Drag => 1,
             Mouse::Up => 2,
+            Mouse::Move => 3,
+            Mouse::Leave => 4,
         };
         unsafe { jp_mouse(self.0, k, x, y, mods, clicks) }
     }
@@ -74,6 +84,24 @@ impl Panel {
     }
     pub fn test_sound(&self, start: bool) {
         unsafe { jp_test_sound(self.0, start as c_int) }
+    }
+    pub fn window_origin(&self, x: f32, y: f32) {
+        unsafe { jp_window_origin(self.0, x, y) }
+    }
+    pub fn window_origin_from_pointer(&self, x: f32, y: f32) {
+        unsafe { jp_window_origin_from_pointer(self.0, x, y) }
+    }
+    pub fn place(&self, x: f32, y: f32, scale: f32) {
+        unsafe { jp_place(self.0, x, y, scale) }
+    }
+    pub fn tooltip(&self, x: f32, y: f32) -> String {
+        unsafe { CStr::from_ptr(jp_tooltip(self.0, x, y)) }.to_string_lossy().into_owned()
+    }
+    pub fn menu_open(&self) -> bool {
+        unsafe { jp_menu_open(self.0) != 0 }
+    }
+    pub fn close_menus(&self) {
+        unsafe { jp_close_menus(self.0) }
     }
 }
 

@@ -4,33 +4,104 @@
 
 namespace panelbridge
 {
+/** A window that isn't one: the peer JUCE gives the panel. It never draws (GPUI shows the panel), but it sits where
+    the panel is on screen, so JUCE delivers the mouse the normal way (with mouse listeners, hover, double-clicks and
+    buttons as on screen) and opens menus and pop-ups over the panel, at its size. */
+struct HeadlessPeer final : juce::ComponentPeer
+{
+    HeadlessPeer (juce::Component& c, int flags) : juce::ComponentPeer (c, flags) {}
+    juce::Rectangle<int> bounds;
+
+    void* getNativeHandle() const override { return nullptr; }
+    void setVisible (bool) override {}
+    void setTitle (const juce::String&) override {}
+    void setBounds (const juce::Rectangle<int>& r, bool) override { bounds = r; }
+    juce::Rectangle<int> getBounds() const override { return bounds; }
+    juce::Point<float> localToGlobal (juce::Point<float> p) override { return p + bounds.getPosition().toFloat(); }
+    juce::Point<float> globalToLocal (juce::Point<float> p) override { return p - bounds.getPosition().toFloat(); }
+    void setMinimised (bool) override {}
+    bool isMinimised() const override { return false; }
+    bool isShowing() const override { return true; }
+    void setFullScreen (bool) override {}
+    bool isFullScreen() const override { return false; }
+    void setIcon (const juce::Image&) override {}
+    bool contains (juce::Point<int> p, bool) const override { return bounds.withZeroOrigin().contains (p); }
+    OptionalBorderSize getFrameSizeIfPresent() const override { return {}; }
+    juce::BorderSize<int> getFrameSize() const override { return {}; }
+    bool setAlwaysOnTop (bool) override { return true; }
+    void toFront (bool) override {}
+    void toBehind (juce::ComponentPeer*) override {}
+    bool isFocused() const override { return true; }
+    void grabFocus() override {}
+    void repaint (const juce::Rectangle<int>&) override {}
+    void performAnyPendingRepaintsNow() override {}
+    void setAlpha (float) override {}
+    juce::StringArray getAvailableRenderingEngines() override { return { "Software Renderer" }; }
+    void textInputRequired (juce::Point<int>, juce::TextInputTarget&) override {}
+};
+
+/** What holds the panel on the (pretend) desktop: in screen points, with the panel scaled into it. */
+struct Mount final : juce::Component
+{
+    Mount() { setAccessible (false); }
+    juce::ComponentPeer* createNewPeer (int flags, void*) override { return new HeadlessPeer (*this, flags); }
+};
+
 struct Host
 {
     std::unique_ptr<juce::ScopedJuceInitialiser_GUI> juce = std::make_unique<juce::ScopedJuceInitialiser_GUI>();
     std::unique_ptr<Adapter> adapter = makeAdapter();
     std::vector<std::pair<juce::String, juce::Component*>> parts = adapter->parts();
     std::string layout;
+    // where the panel is on screen (see HeadlessPeer)
+    Mount mount;
+    juce::Point<float> windowOrigin, originFix, placedAt;
+    float placedScale = 0.0f;
     // the mouse
-    juce::Component::SafePointer<juce::Component> target;
-    juce::Point<float> downPos;
-    juce::Time downTime;
-    bool dragged = false;
-    int clicks = 1;
+    bool buttonDown = false;
+    std::string tip;
     // the keyboard
     std::set<int> held;
     int modBits = 0;
 
     Host()
     {
-        // (visible, so JUCE's hit-testing finds what's under the pointer; it isn't on the desktop, so nothing shows)
         panel().setVisible (true);
+        mount.setSize (panel().getWidth(), panel().getHeight());
+        mount.addAndMakeVisible (panel());
+        mount.setVisible (true);
+        mount.addToDesktop (0); // (a peer that never draws)
         adapter->setKeyHook ([this] (int c) { return held.count (juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) c)) != 0; });
     }
 
     ~Host()
     {
         adapter->prepareToQuit();
+        juce::PopupMenu::dismissAllActiveMenus();
+        mount.removeChildComponent (&panel());
+        mount.removeFromDesktop();
         adapter.reset();
+    }
+
+    /** Where the panel is in the window now (its top left, in window points, and points per panel pixel). */
+    void place (float x, float y, float scale)
+    {
+        const auto origin = windowOrigin + originFix + juce::Point<float> (x, y);
+        if (scale <= 0.0f || (origin == placedAt && scale == placedScale))
+            return;
+        placedAt = origin;
+        placedScale = scale;
+        const auto topLeft = origin.toInt();
+        panel().setTransform (juce::AffineTransform::scale (scale).translated (origin - topLeft.toFloat()));
+        mount.setBounds (topLeft.x, topLeft.y, (int) std::ceil ((float) panel().getWidth() * scale + 1.0f),
+                         (int) std::ceil ((float) panel().getHeight() * scale + 1.0f));
+    }
+
+    void originFromPointer (float x, float y)
+    {
+        // (from a real mouse event: where the pointer is on screen, less where it is in the window; GPUI's own idea of
+        // the window's position is only right on the main display)
+        originFix = juce::Desktop::getInstance().getMainMouseSource().getRawScreenPosition() - juce::Point<float> (x, y) - windowOrigin;
     }
 
     juce::Component& panel() { return adapter->panel(); }
@@ -167,99 +238,102 @@ struct Host
         return juce::ModifierKeys (f);
     }
 
-    juce::MouseEvent eventFor (juce::Component& c, juce::Point<float> p, int bits, bool button)
-    {
-        const auto local = c.getLocalPoint (&panel(), p);
-        const auto down = c.getLocalPoint (&panel(), downPos);
-        return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), local, modsFrom (bits, button), juce::MouseInputSource::defaultPressure,
-                                 0.0f, 0.0f, 0.0f, 0.0f, &c, &c, juce::Time::getCurrentTime(), down, downTime, clicks, dragged);
-    }
-
-    /** The button a click lands on (the component itself, or a button it's part of). */
-    static juce::Button* buttonOf (juce::Component* c)
-    {
-        for (; c != nullptr; c = c->getParentComponent())
-            if (auto* b = dynamic_cast<juce::Button*> (c))
-                return b;
-        return nullptr;
-    }
-
     juce::Component* componentAt (juce::Point<float> p)
     {
         auto* c = panel().getComponentAt (p.roundToInt());
         return c != nullptr ? c : &panel();
     }
 
-    void mouse (int kind, float x, float y, int bits, int numClicks)
+    /** The mouse, through the panel's peer (kind 0 down, 1 drag, 2 up, 3 moved with no button, 4 left the panel). */
+    void mouse (int kind, float x, float y, int bits, int)
     {
-        const juce::Point<float> p (x, y);
-        if (kind == 0)
-        {
-            target = componentAt (p);
-            downPos = p;
-            downTime = juce::Time::getCurrentTime();
-            dragged = false;
-            clicks = std::max (1, numClicks);
-            if (auto* t = target.getComponent())
-            {
-                // (a button only presses on screen, which this panel isn't: press it directly, so its hold and
-                // release callbacks still run, and click it on release)
-                if (auto* button = buttonOf (t))
-                {
-                    target = button;
-                    if (button->isEnabled())
-                        button->setState (juce::Button::buttonDown);
-                    return;
-                }
-                const auto e = eventFor (*t, p, bits, true);
-                t->mouseDown (e);
-                if (clicks == 2 && target != nullptr)
-                    t->mouseDoubleClick (e);
-            }
+        buttonDown = kind == 0 || (kind == 1 && buttonDown);
+        juce::ModifierKeys::currentModifiers = modsFrom (bits, buttonDown);
+        auto* peer = mount.getPeer();
+        if (peer == nullptr)
             return;
-        }
-        auto* t = target.getComponent();
-        if (kind == 3 || t == nullptr)
-            return;
-        if (auto* button = dynamic_cast<juce::Button*> (t))
-        {
-            const bool over = button->getLocalBounds().contains (button->getLocalPoint (&panel(), p).roundToInt());
-            if (kind == 1)
-                button->setState (over ? juce::Button::buttonDown : juce::Button::buttonNormal);
-            else
-            {
-                const bool wasDown = button->isDown();
-                button->setState (juce::Button::buttonNormal);
-                if (wasDown && over)
-                    button->triggerClick();
-                target = nullptr;
-            }
-            return;
-        }
-        if (kind == 1)
-        {
-            dragged = dragged || p.getDistanceFrom (downPos) > 2.0f;
-            t->mouseDrag (eventFor (*t, p, bits, true));
-            return;
-        }
-        t->mouseUp (eventFor (*t, p, bits, false));
-        target = nullptr;
+        const auto pos = kind == 4 ? juce::Point<float> (-100000.0f, -100000.0f) : mount.getLocalPoint (&panel(), juce::Point<float> (x, y));
+        peer->handleMouseEvent (juce::MouseInputSource::InputSourceType::mouse, pos, juce::ModifierKeys::currentModifiers,
+                                juce::MouseInputSource::defaultPressure, juce::MouseInputSource::defaultOrientation, juce::Time::currentTimeMillis());
     }
 
     void wheel (float x, float y, float dx, float dy, int bits)
     {
-        const juce::Point<float> p (x, y);
-        if (auto* c = componentAt (p))
+        auto* peer = mount.getPeer();
+        if (peer == nullptr)
+            return;
+        juce::ModifierKeys::currentModifiers = modsFrom (bits, buttonDown);
+        juce::MouseWheelDetails d;
+        d.deltaX = dx;
+        d.deltaY = dy;
+        d.isReversed = false;
+        d.isSmooth = true;
+        d.isInertial = false;
+        peer->handleMouseWheel (juce::MouseInputSource::InputSourceType::mouse, mount.getLocalPoint (&panel(), juce::Point<float> (x, y)),
+                                juce::Time::currentTimeMillis(), d);
+    }
+
+    // ---------------------------------------------------------------- tooltips
+
+    /** The caption that names a part: a label right against it, above or below (as on the screens and knobs). */
+    static juce::String captionFor (juce::Component& c)
+    {
+        auto* parent = c.getParentComponent();
+        if (parent == nullptr)
+            return {};
+        const auto b = c.getBounds();
+        juce::String best;
+        int bestGap = 15;
+        for (auto* sib : parent->getChildren())
+            if (auto* l = dynamic_cast<juce::Label*> (sib); l != nullptr && sib != &c && l->isVisible() && l->getText().trim().isNotEmpty())
+            {
+                const auto lb = l->getBounds();
+                if (lb.getRight() <= b.getX() || lb.getX() >= b.getRight())
+                    continue;
+                const int gap = lb.getBottom() <= b.getCentreY() ? b.getY() - lb.getBottom() : lb.getY() - b.getBottom();
+                if (gap >= -4 && gap < bestGap)
+                {
+                    bestGap = gap;
+                    best = l->getText().trim();
+                }
+            }
+        return best;
+    }
+
+    juce::String describe (juce::Component& c)
+    {
+        if (auto* tc = dynamic_cast<juce::TooltipClient*> (&c))
+            if (auto t = tc->getTooltip(); t.isNotEmpty())
+                return t;
+        auto name = adapter->tooltip (c);
+        if (name.isEmpty())
+            name = c.getName().replace ("\n", " ").trim();
+        if (name.isEmpty())
+            name = c.getTitle().trim();
+        if (name.isEmpty())
+            name = captionFor (c);
+        if (auto* sl = dynamic_cast<juce::Slider*> (&c))
         {
-            juce::MouseWheelDetails d;
-            d.deltaX = dx;
-            d.deltaY = dy;
-            d.isReversed = false;
-            d.isSmooth = true;
-            d.isInertial = false;
-            downPos = p;
-            c->mouseWheelMove (eventFor (*c, p, bits, false), d);
+            const auto v = sl->getTextFromValue (sl->getValue()).trim();
+            return name.isNotEmpty() ? name + ": " + v : v;
         }
+        if (auto* cb = dynamic_cast<juce::ComboBox*> (&c))
+            return (name.isNotEmpty() ? name + ": " : juce::String()) + cb->getText() + "  (click to choose)";
+        if (auto* bt = dynamic_cast<juce::Button*> (&c); bt != nullptr && name.isEmpty())
+            name = bt->getButtonText().trim();
+        return name;
+    }
+
+    const char* tooltip (float x, float y)
+    {
+        tip.clear();
+        for (auto* c = panel().getComponentAt (juce::Point<float> (x, y).roundToInt()); c != nullptr && c != &mount; c = c->getParentComponent())
+            if (auto t = describe (*c); t.isNotEmpty())
+            {
+                tip = t.toStdString();
+                break;
+            }
+        return tip.c_str();
     }
 
     // ---------------------------------------------------------------- the keyboard
@@ -293,6 +367,13 @@ struct Host
         }
     }
 
+    /** Where keys go: what has the keyboard inside the panel (a text field being typed in), else the panel's own target. */
+    juce::Component* keyTarget()
+    {
+        auto* f = juce::Component::getCurrentlyFocusedComponent();
+        return f != nullptr && panel().isParentOf (f) ? f : &adapter->keyTarget();
+    }
+
     int key (const char* keyName, const char* chars, bool down, int bits)
     {
         setModifiers (bits);
@@ -307,11 +388,12 @@ struct Host
             const bool repeat = held.count (heldKey) != 0;
             held.insert (heldKey);
             if (! repeat)
-                handled = adapter->keyTarget().keyPressed (juce::KeyPress (code, juce::ModifierKeys::currentModifiers, ch));
+                for (auto* c = keyTarget(); c != nullptr && ! handled; c = c == &panel() ? nullptr : c->getParentComponent())
+                    handled = c->keyPressed (juce::KeyPress (code, juce::ModifierKeys::currentModifiers, ch));
         }
         else
             held.erase (heldKey);
-        handled = adapter->keyTarget().keyStateChanged (down) || handled;
+        handled = keyTarget()->keyStateChanged (down) || handled;
         return handled ? 1 : 0;
     }
 };
@@ -330,6 +412,21 @@ int jp_render_background (JpPanel* p, float scale, uint8_t* bgra, int w, int h) 
 uint64_t jp_signature (JpPanel* p, int index) { return p->host.signature (index); }
 int jp_render_part (JpPanel* p, int index, float scale, uint8_t* bgra, int w, int h) { return p->host.renderPart (index, scale, bgra, w, h); }
 void jp_mouse (JpPanel* p, int kind, float x, float y, int mods, int clicks) { p->host.mouse (kind, x, y, mods, clicks); }
+void jp_window_origin (JpPanel* p, float x, float y) { p->host.windowOrigin = { x, y }; }
+void jp_window_origin_from_pointer (JpPanel* p, float x, float y) { p->host.originFromPointer (x, y); }
+void jp_place (JpPanel* p, float x, float y, float scale) { p->host.place (x, y, scale); }
+const char* jp_tooltip (JpPanel* p, float x, float y) { return p->host.tooltip (x, y); }
+int jp_menu_open (JpPanel*)
+{
+    auto* mcm = juce::ModalComponentManager::getInstanceWithoutCreating();
+    return mcm != nullptr && mcm->getNumModalComponents() > 0 ? 1 : 0;
+}
+void jp_close_menus (JpPanel*)
+{
+    juce::PopupMenu::dismissAllActiveMenus();
+    if (auto* mcm = juce::ModalComponentManager::getInstanceWithoutCreating())
+        mcm->cancelAllModalComponents();
+}
 void jp_wheel (JpPanel* p, float x, float y, float dx, float dy, int mods) { p->host.wheel (x, y, dx, dy, mods); }
 int jp_key (JpPanel* p, const char* key, const char* chars, int down, int mods) { return p->host.key (key, chars, down != 0, mods); }
 void jp_modifiers (JpPanel* p, int mods) { p->host.setModifiers (mods); }

@@ -3,6 +3,7 @@
 #include "PanelBridge.h"
 #include "../src/engine/Engine.h"
 #include "../src/ui/MainComponent.h"
+#include "../src/ui/Widgets.h"
 
 namespace valvebox::ui
 {
@@ -26,6 +27,12 @@ struct GpuiAdapter : panelbridge::Adapter
     juce::String title() override { return "Valvebox VB-16"; }
     juce::Component& panel() override { return *mc; }
     void prepareToQuit() override { mc->prepareToQuit(); }
+    juce::String tooltip (juce::Component& c) override
+    {
+        if (auto* k = dynamic_cast<KnobWidget*> (&c))
+            return k->getLabel();
+        return {};
+    }
     void setKeyHook (std::function<bool (int)> f) override { MainComponent::keyHook = std::move (f); }
     float outputLevel() override { return engine->getOutputLevel(); }
     void testSound (bool start) override

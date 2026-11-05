@@ -24,9 +24,20 @@ int jp_render_background (JpPanel*, float scale, uint8_t* bgra, int w, int h);
 uint64_t jp_signature (JpPanel*, int index);
 int jp_render_part (JpPanel*, int index, float scale, uint8_t* bgra, int w, int h);
 
-/* The mouse, in panel coordinates. kind: 0 down, 1 drag, 2 up, 3 move. mods: 1 shift, 2 command, 4 option,
+/* The mouse, in panel coordinates. kind: 0 down, 1 drag, 2 up, 3 moved with no button, 4 left the panel. mods: 1 shift, 2 command, 4 option,
    8 control. */
 void jp_mouse (JpPanel*, int kind, float x, float y, int mods, int clicks);
+/* Where the panel is on screen, so JUCE opens its menus and pop-ups over it: the window's content (its top left in
+   screen points; or worked out from a real mouse event at x, y in the window), and the panel in the window (its top
+   left in window points, and window points per panel pixel). */
+void jp_window_origin (JpPanel*, float x, float y);
+void jp_window_origin_from_pointer (JpPanel*, float x, float y);
+void jp_place (JpPanel*, float x, float y, float scale);
+/* What the part under x, y (panel pixels) is, for a tooltip ("" if nothing says). */
+const char* jp_tooltip (JpPanel*, float x, float y);
+/* (the self-test) Whether a menu or window is open, and closing them. */
+int jp_menu_open (JpPanel*);
+void jp_close_menus (JpPanel*);
 void jp_wheel (JpPanel*, float x, float y, float dx, float dy, int mods);
 /* The computer keyboard: GPUI's key name ("a", "space", "left", "f1"...) and the typed characters. */
 int jp_key (JpPanel*, const char* key, const char* chars, int down, int mods);
@@ -67,6 +78,8 @@ struct Adapter
     virtual void setKeyHook (std::function<bool (int)>) {}
     /** Before quitting: the panel's settings. */
     virtual void prepareToQuit() {}
+    /** A name for a part, for its tooltip, when the part doesn't say (its tooltip, name or caption come first). */
+    virtual juce::String tooltip (juce::Component&) { return {}; }
 };
 
 /** Made by the device (its adapter file). */
