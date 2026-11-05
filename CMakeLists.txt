@@ -49,6 +49,25 @@ target_link_libraries(Valvebox PRIVATE
   juce::juce_recommended_warning_flags)
 endif()
 
+# ---------------------------------------------------------------- the GPUI front end's bridge
+# A static library with the instrument (engine, and the JUCE panel used off-screen as controller and renderer)
+# behind the C interface in bridge/PanelBridge.h. gpui/build.rs builds and links it.
+option(VALVEBOX_BUILD_BRIDGE "Build the bridge for the GPUI front end" OFF)
+if(VALVEBOX_BUILD_BRIDGE)
+  add_library(valvebox_bridge STATIC ${VALVEBOX_CORE_SOURCES} ${VALVEBOX_UI_SOURCES} bridge/PanelBridge.cpp bridge/ValveboxAdapter.cpp)
+  target_include_directories(valvebox_bridge PRIVATE src)
+  target_compile_definitions(valvebox_bridge PRIVATE ${VALVEBOX_JUCE_DEFS} JUCE_STANDALONE_APPLICATION=0
+    JUCE_APPLICATION_NAME_STRING="Valvebox" JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}")
+  target_link_libraries(valvebox_bridge PRIVATE
+    juce::juce_audio_utils
+    juce::juce_audio_processors
+    juce::juce_audio_devices
+    juce::juce_audio_formats
+    juce::juce_gui_extra
+    PUBLIC
+    juce::juce_recommended_config_flags)
+endif()
+
 # ---------------------------------------------------------------- tests
 juce_add_console_app(ValveboxTests PRODUCT_NAME "ValveboxTests")
 target_sources(ValveboxTests PRIVATE

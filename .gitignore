@@ -3,3 +3,5 @@ build/
 *.valvebox
 external/
 build-release/
+build-bridge/
+gpui/target/

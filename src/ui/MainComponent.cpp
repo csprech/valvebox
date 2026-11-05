@@ -869,7 +869,7 @@ bool MainComponent::keyStateChanged (bool)
     bool handled = false;
     int slot = 0;
     auto track = [&] (char ch, Key k) {
-        const bool down = juce::KeyPress::isKeyCurrentlyDown (ch);
+        const bool down = keyIsDown (ch);
         auto& was = charHeld[(size_t) slot++];
         if (down == was)
             return;

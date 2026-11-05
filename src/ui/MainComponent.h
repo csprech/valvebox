@@ -8,7 +8,13 @@ namespace valvebox::ui
 /** The panel, laid out on a fixed 1500 x 1090 canvas (the original's proportions) that scales with the window. */
 class MainComponent : public juce::Component, private juce::Timer
 {
+    friend struct GpuiAdapter; // (the GPUI front end drives this panel off-screen: bridge/ValveboxAdapter.cpp)
+
 public:
+    /** Whether a character key is held (the GPUI front end answers this; otherwise the computer's keyboard). */
+    static inline std::function<bool (int)> keyHook;
+    static bool keyIsDown (int c) { return keyHook ? keyHook (c) : juce::KeyPress::isKeyCurrentlyDown (c); }
+
     explicit MainComponent (Engine& engine);
     ~MainComponent() override;
 

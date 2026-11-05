@@ -1,0 +1,20 @@
+[package]
+name = "valvebox-gpui"
+version = "0.1.0"
+edition = "2024"
+description = "Valvebox with a GPUI front end: the C++ instrument behind a C bridge, drawn and played in a GPUI window"
+publish = false
+
+[[bin]]
+name = "Valvebox"
+path = "src/main.rs"
+
+[dependencies]
+gpui = { version = "0.2.2", features = ["runtime_shaders"] }
+image = "0.25"
+smallvec = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+cmake = "0.1"

@@ -88,6 +88,8 @@ private:
     Keys with a light glow red from inside when lit. */
 class KeyWidget : public juce::Component
 {
+    friend struct GpuiAdapter;
+
 public:
     enum class Style
     {
@@ -137,6 +139,8 @@ private:
 /** An indicator LED with a label beside or above it. */
 class LampWidget : public juce::Component
 {
+    friend struct GpuiAdapter;
+
 public:
     LampWidget (const juce::String& text, juce::Colour c = colours::ledRed, bool labelAbove = false)
         : label (text), colour (c), above (labelAbove) { setInterceptsMouseClicks (false, false); }
@@ -158,6 +162,8 @@ private:
 /** The endless data dial: drag or scroll; each detent is one click. */
 class DialWidget : public juce::Component
 {
+    friend struct GpuiAdapter;
+
 public:
     std::function<void (int)> onTurn;
     void paint (juce::Graphics&) override;
@@ -175,6 +181,8 @@ private:
     them, and the part status row (the part numbers are printed on the panel under it). */
 class LcdWidget : public juce::Component
 {
+    friend struct GpuiAdapter;
+
 public:
     void setDisplay (const Display& d, bool blinkPhase);
     void paint (juce::Graphics&) override;
@@ -190,6 +198,8 @@ private:
 /** The ribbon controller: a tall touch strip; where you touch, from the bottom (0) to the top (1). */
 class RibbonWidget : public juce::Component
 {
+    friend struct GpuiAdapter;
+
 public:
     std::function<void (bool touching, float pos)> onTouch;
     void paint (juce::Graphics&) override;
@@ -206,6 +216,8 @@ private:
 /** The arpeggiator slider, with its scale. */
 class SliderWidget : public juce::Component
 {
+    friend struct GpuiAdapter;
+
 public:
     std::function<void (float)> onMove;
     void setValue (float v) { value = std::clamp (v, 0.0f, 1.0f); repaint(); }
@@ -229,6 +241,8 @@ public:
 /** The oval window and the two glowing tubes behind its glass; the glow follows TUBE GAIN and the output. */
 class ValveWindow : public juce::Component
 {
+    friend struct GpuiAdapter;
+
 public:
     void setGlow (float tubeGain, float level);
     void paint (juce::Graphics&) override;
