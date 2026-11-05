@@ -57,7 +57,7 @@ struct GpuiAdapter : panelbridge::Adapter
         return p;
     }
 
-    uint64_t signature (juce::Component& c) override
+    uint64_t custom (juce::Component& c) override
     {
         uint64_t h = 1469598103934665603ull;
         if (auto* k = dynamic_cast<KeyWidget*> (&c))

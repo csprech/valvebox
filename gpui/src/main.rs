@@ -88,9 +88,15 @@ impl Device {
                 let mut lines = Vec::new();
                 let _ = this.update(cx, |this, cx| this.self_test_parts(&mut lines, cx));
                 let _ = this.update(cx, |this, _| this.panel.test_sound(true));
-                Timer::after(Duration::from_millis(1500)).await;
+                // (the loudest moment in a second and a half: a drum dies away)
+                let mut level: f32 = 0.0;
+                for _ in 0..30 {
+                    Timer::after(Duration::from_millis(50)).await;
+                    if let Ok(l) = this.update(cx, |this, _| this.panel.output_level()) {
+                        level = level.max(l);
+                    }
+                }
                 let _ = this.update(cx, |this, cx| {
-                    let level = this.panel.output_level();
                     lines.push(format!("{}  it plays: level {level:.3}", if level > 0.01 { "ok  " } else { "FAIL" }));
                     this.panel.test_sound(false);
                     let fails = lines.iter().filter(|l| l.starts_with("FAIL")).count();

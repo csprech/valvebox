@@ -121,12 +121,36 @@ struct Host
         return 0;
     }
 
+    uint64_t walk (juce::Component& c, uint64_t h)
+    {
+        h = mix (h, c.isVisible() ? 1 : 2);
+        if (! c.isVisible())
+            return h;
+        const auto b = c.getBounds();
+        h = mix (mix (mix (mix (h, (uint64_t) b.getX()), (uint64_t) b.getY()), (uint64_t) b.getWidth()), (uint64_t) b.getHeight());
+        if (auto* l = dynamic_cast<juce::Label*> (&c))
+            h = mixString (h, l->getText());
+        if (auto* s = dynamic_cast<juce::Slider*> (&c))
+            h = mixFloat (mix (h, s->isMouseButtonDown()), (float) s->getValue(), 1.0e-4f);
+        if (auto* b2 = dynamic_cast<juce::Button*> (&c))
+            h = mixString (mix (mix (mix (h, b2->getToggleState()), b2->isDown()), b2->isEnabled()), b2->getButtonText());
+        if (auto* cb = dynamic_cast<juce::ComboBox*> (&c))
+            h = mixString (h, cb->getText());
+        if (auto* te = dynamic_cast<juce::TextEditor*> (&c))
+            h = mixString (h, te->getText());
+        h = mix (h, adapter->custom (c));
+        if (adapter->live (c))
+            h = mix (h, juce::Time::getMillisecondCounter() / 100);
+        for (auto* child : c.getChildren())
+            h = walk (*child, h);
+        return h;
+    }
+
     uint64_t signature (int index)
     {
         if (index < 0 || index >= (int) parts.size())
             return 0;
-        auto& c = *parts[(size_t) index].second;
-        return mix (adapter->signature (c), c.isVisible() ? 1 : 2);
+        return walk (*parts[(size_t) index].second, 1469598103934665603ull);
     }
 
     // ---------------------------------------------------------------- the mouse
@@ -150,6 +174,15 @@ struct Host
                                  0.0f, 0.0f, 0.0f, 0.0f, &c, &c, juce::Time::getCurrentTime(), down, downTime, clicks, dragged);
     }
 
+    /** The button a click lands on (the component itself, or a button it's part of). */
+    static juce::Button* buttonOf (juce::Component* c)
+    {
+        for (; c != nullptr; c = c->getParentComponent())
+            if (auto* b = dynamic_cast<juce::Button*> (c))
+                return b;
+        return nullptr;
+    }
+
     juce::Component* componentAt (juce::Point<float> p)
     {
         auto* c = panel().getComponentAt (p.roundToInt());
@@ -168,6 +201,15 @@ struct Host
             clicks = std::max (1, numClicks);
             if (auto* t = target.getComponent())
             {
+                // (a button only presses on screen, which this panel isn't: press it directly, so its hold and
+                // release callbacks still run, and click it on release)
+                if (auto* button = buttonOf (t))
+                {
+                    target = button;
+                    if (button->isEnabled())
+                        button->setState (juce::Button::buttonDown);
+                    return;
+                }
                 const auto e = eventFor (*t, p, bits, true);
                 t->mouseDown (e);
                 if (clicks == 2 && target != nullptr)
@@ -178,6 +220,21 @@ struct Host
         auto* t = target.getComponent();
         if (kind == 3 || t == nullptr)
             return;
+        if (auto* button = dynamic_cast<juce::Button*> (t))
+        {
+            const bool over = button->getLocalBounds().contains (button->getLocalPoint (&panel(), p).roundToInt());
+            if (kind == 1)
+                button->setState (over ? juce::Button::buttonDown : juce::Button::buttonNormal);
+            else
+            {
+                const bool wasDown = button->isDown();
+                button->setState (juce::Button::buttonNormal);
+                if (wasDown && over)
+                    button->triggerClick();
+                target = nullptr;
+            }
+            return;
+        }
         if (kind == 1)
         {
             dragged = dragged || p.getDistanceFrom (downPos) > 2.0f;
@@ -185,9 +242,6 @@ struct Host
             return;
         }
         t->mouseUp (eventFor (*t, p, bits, false));
-        // (a button clicks on release over itself: JUCE's own test of that needs a real pointer)
-        if (auto* b = dynamic_cast<juce::Button*> (t); b != nullptr && t->getLocalBounds().toFloat().contains (t->getLocalPoint (&panel(), p)))
-            b->triggerClick();
         target = nullptr;
     }
 

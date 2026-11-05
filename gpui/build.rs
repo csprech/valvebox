@@ -2,6 +2,7 @@
 const LIB: &str = "valvebox_bridge";
 const OPTION: &str = "VALVEBOX_BUILD_BRIDGE";
 const APP_OPTION: &str = "VALVEBOX_BUILD_APP";
+const EXTRA_LIBS: &[&str] = &[];
 
 fn main() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
@@ -18,6 +19,9 @@ fn main() {
         .build();
     println!("cargo:rustc-link-search=native={}", dst.join("build").display());
     println!("cargo:rustc-link-lib=static={LIB}");
+    for lib in EXTRA_LIBS {
+        println!("cargo:rustc-link-lib=static={lib}");
+    }
     for fw in [
         "Accelerate", "AppKit", "AudioToolbox", "Carbon", "Cocoa", "CoreAudio", "CoreAudioKit", "CoreFoundation", "CoreGraphics",
         "CoreImage", "CoreMIDI", "CoreServices", "CoreText", "Foundation", "IOKit", "Metal", "MetalKit", "QuartzCore", "Security",

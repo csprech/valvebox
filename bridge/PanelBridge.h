@@ -53,7 +53,12 @@ struct Adapter
     virtual juce::Component& panel() = 0;
     /** The parts the front end composites: kind (key, drag, display, button, static) and the component. */
     virtual std::vector<std::pair<juce::String, juce::Component*>> parts() = 0;
-    virtual uint64_t signature (juce::Component& part) = 0;
+    /** What a custom widget holds that changes how it looks (standard JUCE widgets, visibility and bounds are
+        hashed already, through every part's children). */
+    virtual uint64_t custom (juce::Component&) { return 0; }
+    /** Parts drawn from state the adapter can't see (a screen page painting the engine's state): drawn again
+        ten times a second. */
+    virtual bool live (juce::Component&) { return false; }
     virtual float outputLevel() = 0;
     virtual void testSound (bool start) = 0;
     /** The panel asks this whether a character key is held (in place of juce::KeyPress::isKeyCurrentlyDown). */
