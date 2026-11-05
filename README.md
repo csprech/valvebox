@@ -1,5 +1,7 @@
 # Valvebox
 
+> **This is the `gpui` branch:** Valvebox with a [GPUI](https://gpui.rs) front end (experimental). [`gpui/README.md`](gpui/README.md) explains how it's built, run and tested. The JUCE app described below still builds from this branch. [`main`](https://github.com/csprech/valvebox/tree/main) keeps it unchanged.
+
 **VB-16 Groove Production Station.** A desktop groovebox built for research. It reproduces the architecture, controls and behaviour of the classic 2003 valve-equipped groovebox:
 
 - nine drum parts and five monophonic synth parts, plus two accent parts;
