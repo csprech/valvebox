@@ -20,6 +20,8 @@ use std::time::Duration;
 #[derive(Deserialize, Clone)]
 struct Part {
     kind: String,
+    #[serde(default, rename = "type")]
+    type_name: String,
     x: f32,
     y: f32,
     w: f32,
@@ -86,7 +88,9 @@ impl Device {
             cx.spawn(async move |this, cx| {
                 Timer::after(Duration::from_millis(1500)).await;
                 let mut lines = Vec::new();
-                let _ = this.update(cx, |this, cx| this.self_test_parts(&mut lines, cx));
+                if std::env::var("GPUI_SELFTEST_SOUND_ONLY").is_err() {
+                    let _ = this.update(cx, |this, cx| this.self_test_parts(&mut lines, cx));
+                }
                 let _ = this.update(cx, |this, _| this.panel.test_sound(true));
                 // (the loudest moment in a second and a half: a drum dies away)
                 let mut level: f32 = 0.0;
@@ -154,13 +158,35 @@ impl Device {
             let p = self.layout.parts[i].clone();
             let (x, y) = (p.x + p.w * 0.5, p.y + p.h * 0.5);
             match p.kind.as_str() {
+                "slide" => {
+                    // (a 3-way switch: to one end, then the other; one of them is a move)
+                    let before = self.panel.signature(i);
+                    let mut changed = false;
+                    let ends = if p.w >= p.h {
+                        [(p.x + 3.0, y), (p.x + p.w - 3.0, y), (x, y)]
+                    } else {
+                        [(x, p.y + 3.0), (x, p.y + p.h - 3.0), (x, y)]
+                    };
+                    for (xx, yy) in ends {
+                        self.panel.mouse(ffi::Mouse::Down, xx, yy, 0, 1);
+                        self.panel.mouse(ffi::Mouse::Up, xx, yy, 0, 1);
+                        changed = changed || self.panel.signature(i) != before;
+                    }
+                    if !changed {
+                        bad.push(format!("slide {i} ({}) at ({x:.0}, {y:.0}) didn't move", p.type_name));
+                    }
+                    keys += 1;
+                }
                 "key" => {
                     let before = self.panel.signature(i);
                     self.panel.mouse(ffi::Mouse::Down, x, y, 0, 1);
                     let during = self.panel.signature(i);
                     self.panel.mouse(ffi::Mouse::Up, x, y, 0, 1);
+                    // (pressed again: a latching switch goes back to how it was)
+                    self.panel.mouse(ffi::Mouse::Down, x, y, 0, 1);
+                    self.panel.mouse(ffi::Mouse::Up, x, y, 0, 1);
                     if during == before {
-                        bad.push(format!("key {i} at ({x:.0}, {y:.0}) didn't press"));
+                        bad.push(format!("{} {i} ({}) at ({x:.0}, {y:.0}) didn't press", p.kind, p.type_name));
                     }
                     keys += 1;
                 }
@@ -172,16 +198,32 @@ impl Device {
                     }
                     let moved = self.panel.signature(i);
                     self.panel.mouse(ffi::Mouse::Up, x, y - 40.0, 0, 1);
+                    // (and back down: the knob where it was)
+                    self.panel.mouse(ffi::Mouse::Down, x, y, 0, 1);
+                    for step in 1..=8 {
+                        self.panel.mouse(ffi::Mouse::Drag, x, y + step as f32 * 5.0, 0, 1);
+                    }
+                    self.panel.mouse(ffi::Mouse::Up, x, y + 40.0, 0, 1);
                     if moved == before {
                         // (already at the top of its travel: try the other way)
                         self.panel.mouse(ffi::Mouse::Down, x, y, 0, 1);
                         for step in 1..=8 {
                             self.panel.mouse(ffi::Mouse::Drag, x, y + step as f32 * 5.0, 0, 1);
                         }
-                        let back = self.panel.signature(i);
+                        let mut back = self.panel.signature(i);
                         self.panel.mouse(ffi::Mouse::Up, x, y + 40.0, 0, 1);
                         if back == before {
-                            bad.push(format!("{} {i} at ({x:.0}, {y:.0}) didn't move", p.kind));
+                            // (a dial turned round its centre: from the right of it, upwards)
+                            let rx = p.x + p.w * 0.85;
+                            self.panel.mouse(ffi::Mouse::Down, rx, y, 0, 1);
+                            for step in 1..=8 {
+                                self.panel.mouse(ffi::Mouse::Drag, rx, y - step as f32 * 5.0, 0, 1);
+                            }
+                            back = self.panel.signature(i);
+                            self.panel.mouse(ffi::Mouse::Up, rx, y - 40.0, 0, 1);
+                        }
+                        if back == before {
+                            bad.push(format!("{} {i} ({}) at ({x:.0}, {y:.0}) didn't move", p.kind, p.type_name));
                         }
                     }
                     drags += 1;

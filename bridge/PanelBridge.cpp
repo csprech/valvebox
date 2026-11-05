@@ -46,6 +46,7 @@ struct Host
             auto* o = new juce::DynamicObject();
             o->setProperty ("index", (int) i);
             o->setProperty ("kind", parts[i].first);
+            o->setProperty ("type", juce::String (typeid (*parts[i].second).name()));
             o->setProperty ("x", b.getX());
             o->setProperty ("y", b.getY());
             o->setProperty ("w", b.getWidth());
@@ -288,7 +289,7 @@ struct Host
         if (bits != modBits)
         {
             modBits = bits;
-            panel().modifierKeysChanged (juce::ModifierKeys::currentModifiers);
+            adapter->keyTarget().modifierKeysChanged (juce::ModifierKeys::currentModifiers);
         }
     }
 
@@ -306,11 +307,11 @@ struct Host
             const bool repeat = held.count (heldKey) != 0;
             held.insert (heldKey);
             if (! repeat)
-                handled = panel().keyPressed (juce::KeyPress (code, juce::ModifierKeys::currentModifiers, ch));
+                handled = adapter->keyTarget().keyPressed (juce::KeyPress (code, juce::ModifierKeys::currentModifiers, ch));
         }
         else
             held.erase (heldKey);
-        handled = panel().keyStateChanged (down) || handled;
+        handled = adapter->keyTarget().keyStateChanged (down) || handled;
         return handled ? 1 : 0;
     }
 };

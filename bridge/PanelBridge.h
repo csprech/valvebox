@@ -61,6 +61,8 @@ struct Adapter
     virtual bool live (juce::Component&) { return false; }
     virtual float outputLevel() = 0;
     virtual void testSound (bool start) = 0;
+    /** What gets the computer keyboard (the panel, unless keys go to a component inside it). */
+    virtual juce::Component& keyTarget() { return panel(); }
     /** The panel asks this whether a character key is held (in place of juce::KeyPress::isKeyCurrentlyDown). */
     virtual void setKeyHook (std::function<bool (int)>) {}
     /** Before quitting: the panel's settings. */
