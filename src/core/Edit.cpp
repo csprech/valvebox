@@ -1,4 +1,4 @@
-#include "core/Edit.h"
+#include "Edit.h"
 #include <algorithm>
 #include <random>
 #include <vector>

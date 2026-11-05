@@ -4,8 +4,8 @@
 // (16 oscillator models, a 4-type filter with drive, one EG for amp and filter, modulation, glide).
 // Both render a part into its own stereo bus. Allocation-free after prepare().
 
-#include "core/Model.h"
-#include "core/Waves.h"
+#include "Model.h"
+#include "Waves.h"
 #include <array>
 #include <vector>
 

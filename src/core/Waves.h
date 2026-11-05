@@ -6,7 +6,7 @@
 // (keyboards, mallets, winds, brass, voices, strings, guitars, basses, synth waves, hits, chord splits,
 // drum sets). Rendered once, at 48 kHz.
 
-#include "core/Model.h"
+#include "Model.h"
 #include <vector>
 
 namespace valvebox

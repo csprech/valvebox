@@ -10,7 +10,7 @@
 //  * The audio input opens only when something needs it (AUDIO IN THRU, AUTO BPM, the AUDIO IN
 //    oscillator), since macOS asks for permission.
 
-#include "core/Machine.h"
+#include "../core/Machine.h"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_events/juce_events.h>
@@ -20,8 +20,19 @@ namespace valvebox
 class Engine : public juce::AudioIODeviceCallback, public juce::MidiInputCallback, private juce::Timer
 {
 public:
-    Engine();
+    /** Standalone, the engine opens the audio device and the MIDI ports itself and keeps the memory in its file.
+        Hosted (inside a studio or a plug-in host), it opens nothing: the host calls prepareHosted() and
+        processHosted(), and the memory travels with the host's session (it starts from the saved one). */
+    explicit Engine (bool hosted = false);
     ~Engine() override;
+    bool isHosted() const { return hosted; }
+
+    /** Hosted: the sample rate and the largest block to expect. */
+    void prepareHosted (double sampleRate, int maxBlockSize);
+    /** Hosted: one block. `in` is the AUDIO IN jack (mono, may be null); out[0..3] get L, R and the individual
+        outs 3, 4 (any may be null). `midi` brings what arrives at the MIDI IN jack and returns what the
+        instrument sends from its MIDI OUT jack (notes, CCs, clock, dumps). */
+    void processHosted (const float* in, float* const* out, int numOut, int numSamples, juce::MidiBuffer& midi);
 
     template <typename Fn>
     auto withMachine (Fn&& fn)
@@ -48,11 +59,16 @@ private:
     void audioDeviceStopped() override {}
     void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
     void timerCallback() override;
+    void prepare (double sampleRate, int block);
+    void render (const float* in, float* const* out, int numOut, int n, const juce::MidiBuffer* hostIn, juce::MidiBuffer* hostOut);
+    /** A message from a MIDI input: data dumps are collected here; true when it's for the Machine. */
+    bool routeMidi (const juce::MidiMessage& m);
     void midiDevicesChanged();
     void saveMemory();
     void runCard (const Machine::CardRequest& r);
     void sendDump (int what);
 
+    const bool hosted;
     juce::SpinLock lock;
     Machine machine;
     juce::AudioDeviceManager deviceManager;

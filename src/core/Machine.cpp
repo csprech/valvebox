@@ -1,5 +1,5 @@
-#include "core/Machine.h"
-#include "core/Mapping.h"
+#include "Machine.h"
+#include "Mapping.h"
 #include <algorithm>
 #include <cmath>
 

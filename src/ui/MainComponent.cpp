@@ -1,6 +1,6 @@
-#include "ui/MainComponent.h"
-#include "ui/Materials.h"
-#include "core/Mapping.h"
+#include "MainComponent.h"
+#include "Materials.h"
+#include "../core/Mapping.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 
 namespace valvebox::ui
@@ -64,7 +64,10 @@ MainComponent::MainComponent (Engine& e) : engine (e)
     };
     noFocus (*this);
     addMouseListener (this, true);
-    loadSettings();
+    if (engine.isHosted())
+        audioBtn.setVisible (false); // the studio's audio interface does this job (and saves the panel with the session)
+    else
+        loadSettings();
     {
         // as big as the screen allows, up to the panel's own size
         const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay();

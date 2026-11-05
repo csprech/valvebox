@@ -2,7 +2,7 @@
 // modulation, the 16 effects and the chain, the valve stage, and the data model's files.
 
 #include "Rig.h"
-#include "core/Edit.h"
+#include "../src/core/Edit.h"
 
 using namespace vbtest;
 

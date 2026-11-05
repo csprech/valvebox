@@ -3,7 +3,7 @@
 // The three effect processors (16 types each, two EDIT knobs), and the valve output stage.
 // Stereo in place; allocation-free after prepare().
 
-#include "core/Model.h"
+#include "Model.h"
 #include <array>
 #include <vector>
 

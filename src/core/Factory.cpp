@@ -1,8 +1,8 @@
 // Valvebox's own factory patterns and demo songs (the original's 192 preset patterns aren't
 // copied: these are new, in the same spirit, one or two per style).
 
-#include "core/Model.h"
-#include "core/Waves.h"
+#include "Model.h"
+#include "Waves.h"
 #include <initializer_list>
 #include <string>
 

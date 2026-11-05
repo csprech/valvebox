@@ -1,4 +1,4 @@
-#include "core/Machine.h"
+#include "../src/core/Machine.h"
 #include <juce_core/juce_core.h>
 
 using namespace valvebox;

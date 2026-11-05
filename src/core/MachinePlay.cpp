@@ -2,8 +2,8 @@
 // the end of the pattern, pattern-set chains, song playback and event recording, motion sequences,
 // realtime / step recording, the arpeggiator, the metronome and count-in, auto BPM, MIDI in / out.
 
-#include "core/Machine.h"
-#include "core/Mapping.h"
+#include "Machine.h"
+#include "Mapping.h"
 #include <algorithm>
 #include <cmath>
 

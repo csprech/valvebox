@@ -4,7 +4,7 @@
 // Where the manual gives a table (drum pitch, oscillator pitch, comb and sync pitch, BPM-synced
 // times) it's followed exactly; elsewhere the ranges are chosen to sound and feel like the original.
 
-#include "core/Model.h"
+#include "Model.h"
 #include <algorithm>
 #include <cmath>
 

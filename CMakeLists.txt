@@ -10,21 +10,9 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/JUCE/CMakeLists.txt")
 endif()
 add_subdirectory(external/JUCE)
 
-# The instrument without its window: compiled into both the app and the test runner.
-set(VALVEBOX_CORE_SOURCES
-  src/core/Model.cpp
-  src/core/Waves.cpp
-  src/core/Voices.cpp
-  src/core/Effects.cpp
-  src/core/Rack.cpp
-  src/core/Edit.cpp
-  src/core/Machine.cpp
-  src/core/MachinePlay.cpp
-  src/core/Factory.cpp
-)
-
-# (switches over enums use `default:` on purpose; JUCE's warning set flags every one)
-set_source_files_properties(${VALVEBOX_CORE_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wno-switch-enum;-Wno-float-equal")
+# The source lists (the instrument without its window, the engine and panel, the processor for hosts) live in
+# valvebox-module.cmake, so the Tabletop studio compiles exactly what the app does.
+include(valvebox-module.cmake)
 
 set(VALVEBOX_JUCE_DEFS
   JUCE_WEB_BROWSER=0
@@ -43,11 +31,7 @@ juce_add_gui_app(Valvebox
   MICROPHONE_PERMISSION_TEXT "Valvebox listens to its AUDIO IN (audio input 1) for AUDIO IN THRU, AUTO BPM SCAN and the audio-in oscillator.")
 
 target_sources(Valvebox PRIVATE
-  ${VALVEBOX_CORE_SOURCES}
-  src/engine/Engine.cpp
-  src/ui/Materials.cpp
-  src/ui/Widgets.cpp
-  src/ui/MainComponent.cpp
+  ${VALVEBOX_MODULE_SOURCES}
   src/Main.cpp)
 target_include_directories(Valvebox PRIVATE src)
 target_compile_definitions(Valvebox PRIVATE ${VALVEBOX_JUCE_DEFS} JUCE_APPLICATION_NAME_STRING="Valvebox"
@@ -55,6 +39,7 @@ target_compile_definitions(Valvebox PRIVATE ${VALVEBOX_JUCE_DEFS} JUCE_APPLICATI
 target_compile_options(Valvebox PRIVATE -Wno-float-equal)
 target_link_libraries(Valvebox PRIVATE
   juce::juce_audio_utils
+  juce::juce_audio_processors
   juce::juce_audio_devices
   juce::juce_audio_formats
   juce::juce_gui_extra

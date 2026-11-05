@@ -1,7 +1,7 @@
 #pragma once
 
-#include "engine/Engine.h"
-#include "ui/Widgets.h"
+#include "../engine/Engine.h"
+#include "Widgets.h"
 
 namespace valvebox::ui
 {

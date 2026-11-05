@@ -1,6 +1,6 @@
-#include "ui/Widgets.h"
-#include "ui/DotFont.h"
-#include "ui/Materials.h"
+#include "Widgets.h"
+#include "DotFont.h"
+#include "Materials.h"
 
 namespace valvebox::ui
 {

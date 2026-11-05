@@ -1,4 +1,4 @@
-#include "engine/Engine.h"
+#include "Engine.h"
 
 namespace valvebox
 {
@@ -43,7 +43,7 @@ namespace
     }
 } // namespace
 
-Engine::Engine()
+Engine::Engine (bool isHosted) : hosted (isHosted)
 {
     WaveLibrary::get(); // render the waves before any sound is asked for
     juce::File memFile = getMemoryFile();
@@ -55,6 +55,11 @@ Engine::Engine()
     }
     machine.setCardFolder (juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Valvebox Card"));
     machine.takeMemoryChanged(); // (loading isn't a change)
+    if (hosted)
+    {
+        startTimerHz (10); // card jobs and dumps
+        return;
+    }
     if (auto* path = std::getenv ("VALVEBOX_CAPTURE_WAV"))
         captureFile = juce::File (path);
 
@@ -71,6 +76,11 @@ Engine::Engine()
 Engine::~Engine()
 {
     stopTimer();
+    if (hosted)
+    {
+        io.removeAllJobs (false, 10000);
+        return; // (the session keeps a hosted instance's memory)
+    }
     midiDeviceListConnection.reset();
     deviceManager.removeMidiInputDeviceCallback ({}, this);
     deviceManager.removeAudioCallback (this);
@@ -149,6 +159,12 @@ void Engine::midiDevicesChanged()
 
 void Engine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& m)
 {
+    if (routeMidi (m))
+        collector.addMessageToQueue (m);
+}
+
+bool Engine::routeMidi (const juce::MidiMessage& m)
+{
     if (m.isSysEx())
     {
         // a data dump coming in (ours): assembled here, loaded on the message thread
@@ -158,17 +174,27 @@ void Engine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessag
             const juce::ScopedLock sl (sysexLock);
             sysexIn.replaceAll (d + 3, (size_t) m.getSysExDataSize() - 3);
         }
-        return;
+        return false;
     }
-    collector.addMessageToQueue (m);
+    return true;
 }
 
-void Engine::audioDeviceAboutToStart (juce::AudioIODevice* device)
+void Engine::audioDeviceAboutToStart (juce::AudioIODevice* device) { prepare (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples()); }
+
+void Engine::prepareHosted (double sr, int maxBlock) { prepare (sr, maxBlock); }
+
+void Engine::processHosted (const float* in, float* const* out, int numOut, int n, juce::MidiBuffer& midi)
 {
-    const double sr = device->getCurrentSampleRate();
+    juce::MidiBuffer sent;
+    render (in, out, numOut, n, &midi, &sent);
+    midi.swapWith (sent);
+}
+
+void Engine::prepare (double sr, int blockSize)
+{
     sampleRate = sr;
     collector.reset (sr);
-    const int block = std::max (512, device->getCurrentBufferSizeSamples());
+    const int block = std::max (512, blockSize);
     silence.assign ((size_t) block, 0.0f);
     {
         const juce::SpinLock::ScopedLockType sl (lock);
@@ -185,12 +211,20 @@ void Engine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut, int n,
                                                const juce::AudioIODeviceCallbackContext&)
 {
+    render (numIn > 0 ? in[0] : nullptr, out, numOut, n, nullptr, nullptr);
+}
+
+void Engine::render (const float* input, float* const* out, int numOut, int n, const juce::MidiBuffer* hostIn, juce::MidiBuffer* hostOut)
+{
     for (int c = 0; c < numOut; ++c)
         if (out[c] != nullptr)
             juce::FloatVectorOperations::clear (out[c], n);
     midiBlock.clear();
     collector.removeNextBlockOfMessages (midiBlock, n);
-    const float* input = numIn > 0 && in[0] != nullptr ? in[0] : nullptr;
+    if (hostIn != nullptr)
+        for (const auto meta : *hostIn) // the MIDI IN jack, where it arrived in the block
+            if (routeMidi (meta.getMessage()))
+                midiBlock.addEvent (meta.getMessage(), juce::jlimit (0, juce::jmax (0, n - 1), meta.samplePosition));
     {
         const juce::SpinLock::ScopedLockType sl (lock);
         // MIDI lands where it arrived in the block
@@ -202,7 +236,9 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
             for (int c = 0; c < 4; ++c)
                 o[(size_t) c] = c < numOut && out[c] != nullptr ? out[c] + pos : nullptr;
             machine.process (o.data(), std::min (numOut, 4), end - pos, input != nullptr ? input + pos : nullptr);
-            if (midiOut != nullptr && ! machine.midiOut().isEmpty())
+            if (hostOut != nullptr)
+                hostOut->addEvents (machine.midiOut(), 0, -1, pos); // the MIDI OUT jack, at its place in the block
+            else if (midiOut != nullptr && ! machine.midiOut().isEmpty())
                 midiOut->sendBlockOfMessages (machine.midiOut(), juce::Time::getMillisecondCounterHiRes() + 5.0, sampleRate.load());
             machine.midiOut().clear(); // sent (or nowhere to send it); what the panel adds next goes out with the next block
             pos = end;
@@ -239,7 +275,7 @@ void Engine::timerCallback()
 {
     Machine::CardRequest req;
     bool changed = false, wantsInput = false;
-    const bool running = deviceManager.getCurrentAudioDevice() != nullptr;
+    const bool running = hosted || deviceManager.getCurrentAudioDevice() != nullptr;
     withMachine ([&] (Machine& m) {
         req = m.takeCardRequest();
         changed = m.takeMemoryChanged();
@@ -247,15 +283,15 @@ void Engine::timerCallback()
         if (! running)
             m.midiOut().clear(); // no audio callback to send it: don't let the panel's MIDI pile up
     });
-    if (changed)
-        saveMemory();
+    if (changed && ! hosted)
+        saveMemory(); // (hosted, the memory is saved with the session)
     if (req.kind == Machine::CardRequest::DumpTx)
         sendDump (req.dumpWhat);
     else if (req.kind != Machine::CardRequest::None)
         runCard (req);
 
-    // open the audio input the first time something needs it
-    if (wantsInput && ! inputOpen)
+    // open the audio input the first time something needs it (hosted, it's the AUDIO IN jack)
+    if (wantsInput && ! inputOpen && ! hosted)
     {
         auto setup = deviceManager.getAudioDeviceSetup();
         setup.useDefaultInputChannels = false;
@@ -332,7 +368,7 @@ void Engine::runCard (const Machine::CardRequest& r)
 
 void Engine::sendDump (int what)
 {
-    if (midiOut == nullptr)
+    if (midiOut == nullptr && ! hosted)
     {
         if (onMessage)
             onMessage ("MIDI dump: choose a MIDI output in Audio/MIDI first");
@@ -357,7 +393,11 @@ void Engine::sendDump (int what)
     auto packed = pack7 (mos.getMemoryBlock());
     juce::MemoryBlock msg (kSysexHeader, sizeof (kSysexHeader));
     msg.append (packed.getData(), packed.getSize());
-    midiOut->sendMessageNow (juce::MidiMessage::createSysExMessage (msg.getData(), (int) msg.getSize()));
+    const auto sysex = juce::MidiMessage::createSysExMessage (msg.getData(), (int) msg.getSize());
+    if (hosted)
+        withMachine ([&] (Machine& m) { m.midiOut().addEvent (sysex, 0); }); // out of the MIDI OUT jack with the next block
+    else
+        midiOut->sendMessageNow (sysex);
     if (onMessage)
         onMessage ("MIDI dump sent (" + juce::String ((int) (msg.getSize() / 1024)) + " KB)");
 }

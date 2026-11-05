@@ -4,8 +4,8 @@
 // to the line outs (through its effect when FX SEND is on) or to the individual outs 3/4, the three
 // effects in their chain, then VALVE FORCE and MASTER VOLUME on the line outs.
 
-#include "core/Effects.h"
-#include "core/Voices.h"
+#include "Effects.h"
+#include "Voices.h"
 #include <array>
 
 namespace valvebox

@@ -1,4 +1,4 @@
-#include "core/Model.h"
+#include "Model.h"
 #include <algorithm>
 
 namespace valvebox

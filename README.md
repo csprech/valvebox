@@ -265,3 +265,10 @@ Other testing aids:
 | `src/engine` | Audio and MIDI devices, the memory file, card file jobs. |
 | `src/ui` | The panel: widgets, the layout (a 1500 × 1090 canvas in the original's proportions and arrangement, scaled to the window), the rendered materials (aluminium knobs, extruded rubber keys, metallic paint), the LCD's dot-matrix font. |
 | `tests` | The unit tests. |
+
+## In the Tabletop studio
+
+Valvebox also runs inside [Tabletop](https://github.com/csprech/tabletop), a studio where devices sit on a wooden table and you cable them together.
+- `valvebox-module.cmake` lists the sources a host compiles; this app builds from the same lists.
+- `src/plugin/ValveboxProcessor` wraps the engine and the panel as a JUCE audio processor. Its jacks become the processor's audio and MIDI buses: AUDIO IN, OUTPUT L/R, INDIVIDUAL OUT 3/4, MIDI IN and MIDI OUT; each instance keeps its own memory, saved with the studio's table.
+- In hosted mode the engine opens no audio or MIDI device of its own: the host feeds it audio and MIDI a block at a time.

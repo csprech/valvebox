@@ -3,7 +3,7 @@
 // Pattern edit operations (the SHIFT + step key functions, p.54-57). They act on the pattern's
 // valid steps (length x last step); data moved past the end wraps to the start.
 
-#include "core/Model.h"
+#include "Model.h"
 #include <bitset>
 
 namespace valvebox::edit

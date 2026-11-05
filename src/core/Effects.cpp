@@ -1,5 +1,5 @@
-#include "core/Effects.h"
-#include "core/Mapping.h"
+#include "Effects.h"
+#include "Mapping.h"
 #include <algorithm>
 #include <cmath>
 

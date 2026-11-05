@@ -1,5 +1,5 @@
-#include "core/Voices.h"
-#include "core/Mapping.h"
+#include "Voices.h"
+#include "Mapping.h"
 #include <algorithm>
 #include <cmath>
 

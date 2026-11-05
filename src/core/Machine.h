@@ -8,8 +8,8 @@
 // Threading: the engine calls everything under one lock; process() runs on the audio thread and
 // never allocates (song event lists are reserved up front, files are read on the message thread).
 
-#include "core/Edit.h"
-#include "core/Rack.h"
+#include "Edit.h"
+#include "Rack.h"
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <bitset>
 #include <functional>

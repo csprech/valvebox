@@ -1,5 +1,5 @@
-#include "core/Rack.h"
-#include "core/Mapping.h"
+#include "Rack.h"
+#include "Mapping.h"
 #include <algorithm>
 #include <cmath>
 

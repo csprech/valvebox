@@ -3,8 +3,8 @@
 // A test bench for the headless instrument: press keys, turn knobs, run time forward, look at
 // what came out.
 
-#include "core/Machine.h"
-#include "core/Mapping.h"
+#include "../src/core/Machine.h"
+#include "../src/core/Mapping.h"
 #include <juce_core/juce_core.h>
 #include <cmath>
 #include <set>

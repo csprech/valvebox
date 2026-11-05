@@ -6,7 +6,7 @@
 // Shadows and key wells are static, so the panel background draws them (from faceArea() / knobArea()); the widgets
 // draw only what moves or lights.
 
-#include "core/Machine.h"
+#include "../core/Machine.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
 
